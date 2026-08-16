@@ -1,0 +1,26 @@
+[Unit]
+Description=Dengue risk assessment service (FastAPI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 部署用户：AWS Lightsail / EC2 的 Ubuntu 镜像默认用户是 ubuntu；
+# 其他环境（如阿里云）按实际情况改成拥有 /opt/jiayi 的用户。
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/jiayi
+EnvironmentFile=/opt/jiayi/.env
+# 绑定 80 这类特权端口所需的能力；这样不必用 root 运行。
+# 若改用 8000 等非特权端口，可删掉下面两行。
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+ExecStart=/opt/jiayi/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 80 --workers 2
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>登革热风险自测</title>
+  <meta name="description" content="回答症状与病史问题，获得登革热风险参考评分与防护建议。结果仅供参考，不构成医疗诊断。" />
+  <meta name="theme-color" content="#0f766e" />
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <!-- 语言切换器（固定右上角，各视图共用） -->
+  <div id="lang-switcher" class="lang-switcher">
+    <button id="lang-toggle" class="lang-toggle" type="button"
+            aria-haspopup="listbox" aria-expanded="false" aria-label="选择语言">
+      <span class="lang-globe" aria-hidden="true">🌐</span>
+      <span id="lang-current" class="lang-current">简体中文</span>
+      <span class="lang-caret" aria-hidden="true">▾</span>
+    </button>
+    <ul id="lang-menu" class="lang-menu" role="listbox" aria-label="选择语言" hidden>
+      <li><button class="lang-option" type="button" role="option" data-lang="zh-CN" aria-selected="true">简体中文</button></li>
+      <li><button class="lang-option" type="button" role="option" data-lang="zh-TW" aria-selected="false">繁體中文</button></li>
+      <li><button class="lang-option" type="button" role="option" data-lang="en" aria-selected="false">English</button></li>
+      <li><button class="lang-option" type="button" role="option" data-lang="es" aria-selected="false">Español</button></li>
+      <li><button class="lang-option" type="button" role="option" data-lang="pt" aria-selected="false">Português</button></li>
+    </ul>
+  </div>
+
+  <main id="app">
+
+    <!-- ① Hero 视图 -->
+    <section id="view-hero" class="view hero-view">
+      <div class="hero-orbs" aria-hidden="true">
+        <span class="orb orb-a"></span>
+        <span class="orb orb-b"></span>
+        <span class="orb orb-c"></span>
+      </div>
+      <div class="hero">
+        <div class="hero-badge" id="hero-badge">登革热 · 风险自评</div>
+        <h1 class="hero-title" id="hero-title">登革热<br />风险自测</h1>
+        <p class="hero-subtitle" id="hero-subtitle">回答症状与病史问题，获得风险参考与防护建议</p>
+        <button id="btn-start" class="btn btn-hero" type="button">
+          <span id="btn-start-text">开始评估</span>
+          <span class="btn-arrow" aria-hidden="true">→</span>
+        </button>
+        <ul class="hero-points" id="hero-points" aria-label="产品特点"></ul>
+      </div>
+      <p class="hero-disclaimer" id="hero-disclaimer">本结果仅供参考，不构成医疗诊断。如有不适请及时就医。</p>
+    </section>
+
+    <!-- ② Wizard 视图（分步问卷） -->
+    <section id="view-wizard" class="view" hidden>
+      <div class="shell">
+        <header class="wizard-header">
+          <div class="wizard-meta">
+            <span class="wizard-brand" id="wizard-brand">🦟 登革热风险自测</span>
+            <span id="step-counter" class="step-counter">第 1 步 / 共 6 步</span>
+          </div>
+          <div class="progress" role="progressbar" aria-label="问卷进度"
+               aria-valuemin="1" aria-valuemax="6" aria-valuenow="1">
+            <div class="progress-track"><div id="progress-fill" class="progress-fill"></div></div>
+            <div id="progress-steps" class="progress-steps" aria-hidden="true"></div>
+          </div>
+        </header>
+
+        <div id="wizard-panel" class="wizard-panel card"><!-- 步骤内容由 app.js 渲染 --></div>
+
+        <p id="wizard-hint" class="wizard-hint" role="alert" hidden></p>
+
+        <div class="wizard-nav">
+          <button id="btn-prev" class="btn btn-secondary" type="button">上一步</button>
+          <button id="btn-next" class="btn btn-primary" type="button">下一步</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ③ Loading 视图 -->
+    <section id="view-loading" class="view" hidden>
+      <div class="loading-wrap">
+        <div class="pulse" aria-hidden="true">
+          <span class="pulse-ring r1"></span>
+          <span class="pulse-ring r2"></span>
+          <span class="pulse-ring r3"></span>
+          <span class="pulse-core">🦟</span>
+        </div>
+        <p id="loading-text" class="loading-text" aria-live="polite">正在整理你的作答…</p>
+        <p class="loading-sub" id="loading-sub">请稍候，通常不超过 10 秒</p>
+      </div>
+    </section>
+
+    <!-- ④ Result 视图 -->
+    <section id="view-result" class="view" hidden>
+      <div class="shell result-shell">
+        <header class="result-header">
+          <h2 class="result-title" id="result-title">评估结果</h2>
+          <p class="result-sub" id="result-sub">基于你提供的症状与病史生成</p>
+        </header>
+
+        <!-- WHO 警示征象提示（规则判断，独立于模型评分） -->
+        <div id="warning-banner" class="warning-banner" role="alert" hidden>
+          <span class="warning-icon" aria-hidden="true">⚠️</span>
+          <div class="warning-body">
+            <strong id="warning-title" class="warning-title"></strong>
+            <p id="warning-text" class="warning-text"></p>
+          </div>
+        </div>
+
+        <div class="card gauge-card">
+          <div class="gauges">
+            <!-- 主仪表盘：登革热可能性（模型 A） -->
+            <div class="gauge-wrap gauge-primary" id="gauge-dengue">
+              <svg class="gauge" viewBox="0 0 220 220" role="img" aria-labelledby="label-dengue">
+                <circle class="gauge-track" cx="110" cy="110" r="92" />
+                <circle id="arc-dengue" class="gauge-arc" cx="110" cy="110" r="92" />
+              </svg>
+              <div class="gauge-center">
+                <div id="score-dengue" class="gauge-score">0</div>
+                <div class="gauge-unit" id="label-dengue">登革热可能性</div>
+                <div id="badge-dengue" class="level-badge">—</div>
+              </div>
+            </div>
+
+            <!-- 次仪表盘：重症风险（模型 B2） -->
+            <div class="gauge-wrap gauge-secondary" id="gauge-severe">
+              <svg class="gauge" viewBox="0 0 220 220" role="img" aria-labelledby="label-severe">
+                <circle class="gauge-track" cx="110" cy="110" r="92" />
+                <circle id="arc-severe" class="gauge-arc" cx="110" cy="110" r="92" />
+              </svg>
+              <div class="gauge-center">
+                <div id="score-severe" class="gauge-score">0</div>
+                <div class="gauge-unit" id="label-severe">重症风险</div>
+                <div id="badge-severe" class="level-badge">—</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 第三项：病情加重风险（模型 B），横条展示 -->
+          <div class="bar-metric" id="metric-worsening">
+            <div class="bar-head">
+              <span class="bar-label" id="label-worsening">病情加重风险</span>
+              <span class="bar-value"><span id="score-worsening">0</span>
+                <span id="badge-worsening" class="level-badge level-inline">—</span></span>
+            </div>
+            <div class="bar-track"><div id="bar-worsening" class="bar-fill"></div></div>
+          </div>
+
+          <p id="result-summary" class="result-summary"></p>
+          <p id="model-note" class="model-note"></p>
+          <p id="epi-week-line" class="epi-week"></p>
+        </div>
+
+        <div id="advice-cards" class="advice-grid"><!-- 建议卡片由 app.js 渲染 --></div>
+
+        <div class="result-actions">
+          <button id="btn-restart" class="btn btn-primary" type="button">重新评估</button>
+          <button id="btn-home" class="btn btn-secondary" type="button">返回首页</button>
+        </div>
+      </div>
+      <div id="disclaimer-bar" class="disclaimer-bar">本结果仅供参考，不构成医疗诊断。如有不适请及时就医。</div>
+    </section>
+
+  </main>
+
+  <!-- 错误浮层 -->
+  <div id="error-overlay" class="overlay" hidden>
+    <div class="overlay-backdrop" aria-hidden="true"></div>
+    <div class="overlay-card card" role="alertdialog" aria-modal="true" aria-labelledby="error-title" aria-describedby="error-detail">
+      <div class="overlay-icon" aria-hidden="true">⚠️</div>
+      <h3 id="error-title" class="overlay-title">评估失败</h3>
+      <p id="error-detail" class="error-detail"></p>
+      <div class="overlay-actions">
+        <button id="btn-retry" class="btn btn-primary" type="button">重试</button>
+        <button id="btn-error-close" class="btn btn-secondary" type="button">返回修改</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="./app.js" defer></script>
+</body>
+</html>

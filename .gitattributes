@@ -1,0 +1,16 @@
+# 默认由 Git 处理行尾
+* text=auto
+
+# 这些文件在 Linux 服务器上执行，必须是 LF：
+# CRLF 会导致 "bash\r: not found" 之类的诡异错误
+*.sh          text eol=lf
+*.service     text eol=lf
+.env.example  text eol=lf
+
+# Python / 前端源码统一 LF，避免跨平台 diff 噪音
+*.py    text eol=lf
+*.js    text eol=lf
+*.css   text eol=lf
+*.html  text eol=lf
+*.json  text eol=lf
+*.md    text eol=lf

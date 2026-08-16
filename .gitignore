@@ -1,0 +1,37 @@
+# ===== 绝对不能提交：凭据与密钥 =====
+account.txt
+*.pem
+*.key
+.env
+.env.*
+!.env.example
+
+# ===== 用户数据 =====
+# 评估回流记录（含健康问卷特征），属个人健康数据，不入库
+data/
+*.jsonl
+
+# ===== Python =====
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ===== 原始研究材料（体积大且非本服务运行所需）=====
+# 应用只需要 app/model/dengue_models.json 里的系数
+Dengue_项目分享.zip
+*.pdf
+*.docx
+*.pptx
+
+# ===== 编辑器 / 系统 =====
+.claude/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
