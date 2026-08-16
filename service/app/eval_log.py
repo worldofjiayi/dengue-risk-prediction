@@ -4,7 +4,12 @@
 项目 README 的「已知局限」指出阈值未在本地人群校准，这份回流数据就是校准的原料。
 
 每行一条 JSON：26 个模型特征、三个模型的 score/level/z、流行病学周、
-UTC 时间戳、language、mock_mode 标记（供离线分析时过滤演示数据）。
+UTC 时间戳、language、mock_mode 标记（供离线分析时过滤演示数据），
+以及三项流行病学暴露答案与规则判出的暴露等级。
+
+暴露答案之所以可以落盘：它们和症状一样是分类答案（yes/no/unknown），
+不含任何可定位到个人的信息，而且正是将来做本地校准时最想知道的协变量——
+「身边有确诊病例」能不能提升模型区分度，只有攒够数据才答得上来。
 notes 原文绝不落盘，仅记录 has_notes 布尔值。
 
 写入失败只记日志，绝不影响评估主流程。
@@ -16,7 +21,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.config import get_settings
-from app.schemas import FormInput, MLFeatures, ModelScore
+from app.schemas import (
+    EXPOSURE_CODES,
+    ExposureContext,
+    FormInput,
+    MLFeatures,
+    ModelScore,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +50,13 @@ def build_record(
     features: MLFeatures,
     scores: dict[str, ModelScore],
     epi_week: int,
+    exposure: ExposureContext | None = None,
 ) -> dict:
-    """组装一条脱敏评测记录（不含 notes 原文等敏感字段）。"""
+    """组装一条脱敏评测记录（不含 notes 原文等敏感字段）。
+
+    exposure 是规则判出的流行病学暴露背景；连同原始答案一起记录，
+    但**不会**出现在 features 里——那 26 维必须与训练脚本严格一致。
+    """
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "language": form.language,
@@ -55,6 +71,9 @@ def build_record(
             }
             for field, key in _MODEL_FIELDS.items()
         },
+        # 流行病学暴露：非模型特征，单独成块，避免与 features 混淆
+        "exposure": {code: form.exposure.get(code, "unknown") for code in EXPOSURE_CODES},
+        "exposure_level": exposure.level if exposure is not None else "low",
         "has_notes": bool(form.notes.strip()),
     }
 
@@ -64,12 +83,13 @@ def log_assessment(
     features: MLFeatures,
     scores: dict[str, ModelScore],
     epi_week: int,
+    exposure: ExposureContext | None = None,
 ) -> None:
     """追加一条评测记录；EVAL_LOG_PATH 为空时关闭回流。"""
     raw_path = get_settings().eval_log_path
     if not raw_path:
         return
-    record = build_record(form, features, scores, epi_week)
+    record = build_record(form, features, scores, epi_week, exposure)
     try:
         path = resolve_log_path(raw_path)
         path.parent.mkdir(parents=True, exist_ok=True)

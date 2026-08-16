@@ -192,7 +192,8 @@ ol {
   transition: transform 0.2s ease;
 }
 
-.lang-switcher.is-open .lang-caret {
+.lang-switcher.is-open .lang-caret,
+.lang-toggle[aria-expanded="true"] .lang-caret {
   transform: rotate(180deg);
 }
 
@@ -234,13 +235,15 @@ ol {
   background: var(--surface-2);
 }
 
-.lang-option.is-active {
+.lang-option.is-active,
+.lang-option.is-current {
   color: var(--accent-ink);
   background: var(--accent-soft);
   font-weight: 700;
 }
 
-.lang-option.is-active::after {
+.lang-option.is-active::after,
+.lang-option.is-current::after {
   content: "✓";
   font-weight: 700;
 }
@@ -307,20 +310,24 @@ ol {
 /* =========================================================
    ① Hero
    ========================================================= */
+/* 纵向 flex：主内容用 auto 外边距居中，底部小字始终跟在其后，
+   不再用绝对定位，短屏上也不会与 CTA 叠在一起。 */
 .hero-view {
   position: relative;
   min-height: 100dvh;
-  display: grid;
-  place-items: center;
-  padding: 32px 24px 64px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 64px 24px calc(18px + env(safe-area-inset-bottom));
   background: var(--hero-grad);
   color: #fff;
-  overflow: hidden;
 }
 
+/* 光晕自己负责裁切：hero-view 不设 overflow，内容超高时页面还能滚 */
 .hero-orbs {
   position: absolute;
   inset: 0;
+  overflow: hidden;
   pointer-events: none;
 }
 
@@ -370,7 +377,9 @@ ol {
 .hero {
   position: relative;
   z-index: 1;
+  width: 100%;
   max-width: 640px;
+  margin: auto 0; /* 在剩余空间里垂直居中 */
   text-align: center;
 }
 
@@ -403,13 +412,14 @@ ol {
   line-height: 1.16;
   letter-spacing: 0.02em;
   text-shadow: 0 4px 24px rgba(0, 0, 0, 0.18);
-  margin-bottom: 18px;
+  margin-bottom: 16px;
 }
 
 .hero-subtitle {
+  max-width: 30rem;
+  margin: 0 auto 34px;
   font-size: clamp(1rem, 3.6vw, 1.2rem);
   color: rgba(255, 255, 255, 0.86);
-  margin-bottom: 40px;
 }
 
 .btn-hero {
@@ -441,25 +451,74 @@ ol {
   transform: translateX(5px);
 }
 
-.hero-points {
+/* --- Hero 底部小字：免责声明 + 隐私 --- */
+.hero-foot {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 44rem;
+  margin-top: 28px;
   display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 10px 22px;
-  margin-top: 34px;
-  font-size: 0.88rem;
-  color: rgba(255, 255, 255, 0.78);
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+  animation: fade-up 0.7s cubic-bezier(0.22, 1, 0.36, 1) 0.4s both;
 }
 
 .hero-disclaimer {
-  position: absolute;
-  left: 20px;
-  right: 20px;
-  bottom: calc(16px + env(safe-area-inset-bottom));
-  text-align: center;
   font-size: 0.75rem;
-  color: rgba(255, 255, 255, 0.55);
-  z-index: 1;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.58);
+}
+
+.hero-privacy {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: center;
+  gap: 4px 8px;
+  max-width: 44rem;
+  font-size: 0.72rem;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* 文字型链接按钮（隐私说明等）：视觉上是小字里的一个链接，
+   触控面积用 ::after 撑到 44px，不影响行高。 */
+.link-btn {
+  position: relative;
+  padding: 2px 3px;
+  border: none;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: color 0.18s ease, opacity 0.18s ease;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.link-btn::after {
+  content: "";
+  position: absolute;
+  left: -6px;
+  right: -6px;
+  top: 50%;
+  height: 44px;
+  transform: translateY(-50%);
+}
+
+.hero-privacy .link-btn {
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.hero-privacy .link-btn:hover {
+  color: #fff;
 }
 
 /* =========================================================
@@ -979,10 +1038,31 @@ ol {
   text-align: center;
 }
 
+/* 仪表盘本身是一个按钮：点击展开「为什么是这个分数」面板 */
 .gauge-wrap {
   position: relative;
+  display: block;
   width: min(250px, 68vw);
   margin: 0 auto;
+  padding: 0 0 4px;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+  border-radius: var(--radius);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition: transform 0.16s ease;
+}
+
+.gauge-wrap:active { transform: scale(0.985); }
+.gauge-wrap:focus-visible { outline: 3px solid var(--ring); outline-offset: 4px; }
+
+.gauge-wrap:disabled {
+  cursor: default;
+  transform: none;
 }
 
 .gauge {
@@ -1007,8 +1087,12 @@ ol {
 }
 
 .gauge-center {
+  /* 只覆盖正方形的 SVG 区域，下方留给「为什么」提示 */
   position: absolute;
-  inset: 0;
+  top: 0;
+  left: 0;
+  right: 0;
+  aspect-ratio: 1 / 1;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1488,13 +1572,29 @@ ol {
 .bar-metric.level-medium { --level-color: var(--amber); --level-soft: rgba(245, 158, 11, 0.12); }
 .bar-metric.level-high   { --level-color: var(--red);   --level-soft: rgba(239, 68, 68, 0.12); }
 
+/* 横条标题行同样是按钮：展开加重风险的贡献项 */
 .bar-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  width: 100%;
+  min-height: 44px;
   margin-bottom: 8px;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 10px;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
+
+.bar-head:focus-visible { outline: 3px solid var(--ring); outline-offset: 3px; }
+.bar-head:disabled { cursor: default; }
 
 .bar-label { font-size: 0.88rem; font-weight: 650; color: var(--text-2); }
 
@@ -1610,6 +1710,546 @@ ol {
 @media (prefers-color-scheme: dark) {
   .warning-banner { background: rgba(239, 68, 68, 0.14); }
   .warning-title { color: #f87171; }
+}
+
+/* =========================================================
+   仅供屏幕阅读器
+   ========================================================= */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* =========================================================
+   「为什么是这个分数」——模型贡献项面板
+   ========================================================= */
+.gauge-why {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--text-3);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  transition: color 0.18s ease, border-color 0.18s ease;
+}
+
+.gauge-wrap:hover .gauge-why {
+  color: var(--accent-ink);
+  border-color: var(--accent);
+}
+
+.gauge-wrap:disabled .gauge-why { display: none; }
+
+.why-caret {
+  display: inline-block;
+  font-size: 0.7em;
+  transition: transform 0.2s ease;
+}
+
+.gauge-wrap[aria-expanded="true"] .gauge-why {
+  color: var(--accent-ink);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.gauge-wrap[aria-expanded="true"] .why-caret,
+.bar-head[aria-expanded="true"] .why-caret {
+  transform: rotate(180deg);
+}
+
+.bar-head .why-caret {
+  font-size: 0.72rem;
+  color: var(--text-3);
+}
+
+.bar-head:disabled .why-caret { display: none; }
+
+.explain-panel {
+  margin: 16px auto 0;
+  max-width: 480px;
+  padding: 16px 16px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  text-align: left;
+  animation: fade-up 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.explain-title {
+  font-size: 0.9rem;
+  font-weight: 750;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+
+.explain-sub {
+  font-size: 0.76rem;
+  line-height: 1.6;
+  color: var(--text-3);
+  margin-bottom: 12px;
+}
+
+.ex-list {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.ex-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 96px 22px;
+  align-items: center;
+  gap: 10px;
+}
+
+.ex-name {
+  font-size: 0.83rem;
+  line-height: 1.4;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+.ex-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.ex-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--text-3);
+}
+
+.ex-fill.dir-up { background: var(--red); }
+.ex-fill.dir-down { background: var(--green); }
+
+.ex-dir {
+  font-size: 0.9rem;
+  font-weight: 800;
+  text-align: center;
+  line-height: 1;
+}
+
+.ex-dir.dir-up { color: var(--red); }
+.ex-dir.dir-down { color: var(--green); }
+
+.explain-note {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border-strong);
+  font-size: 0.74rem;
+  line-height: 1.6;
+  color: var(--text-3);
+}
+
+.explain-note + .explain-note {
+  margin-top: 6px;
+  padding-top: 0;
+  border-top: none;
+}
+
+.explain-empty {
+  font-size: 0.8rem;
+  color: var(--text-3);
+}
+
+/* =========================================================
+   流行病学暴露背景（刻意不做成仪表盘：方角 + 虚线边框）
+   ========================================================= */
+.exposure-chip {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 18px;
+  padding: 14px 16px;
+  border: 1.5px dashed var(--exp-color, var(--border-strong));
+  border-radius: 10px;
+  background: var(--exp-soft, var(--surface-2));
+}
+
+.exposure-chip.exp-low {
+  --exp-color: var(--green);
+  --exp-soft: rgba(16, 185, 129, 0.07);
+  --exp-ink: #059669;
+}
+
+.exposure-chip.exp-medium {
+  --exp-color: var(--amber);
+  --exp-soft: rgba(245, 158, 11, 0.09);
+  --exp-ink: #b45309;
+}
+
+.exposure-chip.exp-high {
+  --exp-color: var(--red);
+  --exp-soft: rgba(239, 68, 68, 0.08);
+  --exp-ink: #dc2626;
+}
+
+.exposure-mark { font-size: 1.15rem; line-height: 1.4; flex: 0 0 auto; }
+.exposure-body { min-width: 0; flex: 1; }
+
+.exposure-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.exposure-label {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.exposure-level {
+  padding: 2px 10px;
+  border-radius: 6px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--exp-ink, var(--text-2));
+  background: var(--surface);
+  border: 1px solid var(--exp-color, var(--border-strong));
+}
+
+.exposure-factors {
+  margin-top: 5px;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  color: var(--text-2);
+}
+
+.exposure-caption {
+  margin-top: 6px;
+  font-size: 0.72rem;
+  line-height: 1.6;
+  color: var(--text-3);
+}
+
+/* =========================================================
+   AI 追问对话
+   ========================================================= */
+.chat-card {
+  margin-top: 18px;
+  padding: 20px 18px 16px;
+}
+
+.chat-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.chat-icon {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  font-size: 1.2rem;
+  border-radius: 12px;
+  background: var(--accent-soft);
+}
+
+.chat-headings { min-width: 0; }
+.chat-title { font-size: 1.05rem; font-weight: 700; }
+
+.chat-sub {
+  font-size: 0.78rem;
+  line-height: 1.55;
+  color: var(--text-3);
+}
+
+.chat-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.chat-chip {
+  min-height: 44px;
+  padding: 8px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.18s, color 0.18s, background 0.18s, transform 0.12s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.chat-chip:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+}
+
+.chat-chip:active:not(:disabled) { transform: scale(0.97); }
+.chat-chip:focus-visible { outline: 3px solid var(--ring); outline-offset: 2px; }
+.chat-chip:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.chat-log {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 420px;
+  overflow-y: auto;
+  padding: 4px 2px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.chat-empty {
+  font-size: 0.82rem;
+  line-height: 1.6;
+  color: var(--text-3);
+  text-align: center;
+  padding: 10px 4px;
+}
+
+.chat-msg {
+  max-width: 86%;
+  padding: 10px 14px;
+  font-size: 0.9rem;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  animation: fade-up 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.chat-msg.is-user {
+  align-self: flex-end;
+  border-radius: 16px 16px 4px 16px;
+  background: var(--brand-grad);
+  color: #fff;
+}
+
+.chat-msg.is-assistant {
+  align-self: flex-start;
+  border-radius: 16px 16px 16px 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.chat-msg.is-error {
+  border-color: var(--red);
+  background: var(--red-soft);
+  color: var(--text-2);
+}
+
+.chat-retry {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  margin-top: 8px;
+  padding: 4px 14px;
+  border: 1px solid var(--red);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--red);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 650;
+  cursor: pointer;
+  transition: background 0.18s;
+}
+
+.chat-retry:hover { background: rgba(239, 68, 68, 0.12); }
+
+.chat-typing {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 14px 16px;
+}
+
+.chat-typing .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-3);
+  animation: typing-bounce 1.2s ease-in-out infinite;
+}
+
+.chat-typing .dot:nth-child(2) { animation-delay: 0.15s; }
+.chat-typing .dot:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes typing-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.45; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+
+.chat-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.chat-input {
+  flex: 1;
+  min-width: 0;
+  min-height: 48px;
+  max-height: 132px;
+  padding: 13px 14px;
+  border: 1.5px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  resize: none;
+  overflow-y: auto;
+  transition: border-color 0.18s;
+}
+
+.chat-input:focus { border-color: var(--accent); outline: none; }
+.chat-input:focus-visible { outline: 3px solid var(--ring); outline-offset: 2px; }
+.chat-input::placeholder { color: var(--text-3); }
+.chat-input:disabled { opacity: 0.6; }
+
+.chat-send {
+  flex: 0 0 auto;
+  min-width: 84px;
+  padding: 0 1.1rem;
+  font-size: 0.92rem;
+}
+
+.chat-send:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.chat-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin-top: 9px;
+  font-size: 0.72rem;
+  line-height: 1.55;
+  color: var(--text-3);
+}
+
+.chat-counter { font-variant-numeric: tabular-nums; flex: 0 0 auto; }
+.chat-counter.is-warn { color: var(--amber); font-weight: 650; }
+.chat-note { flex: 1 1 12rem; min-width: 0; }
+
+.chat-foot .link-btn {
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  color: var(--text-2);
+}
+
+.chat-foot .link-btn:hover { color: var(--accent-ink); }
+
+/* =========================================================
+   隐私说明浮层
+   ========================================================= */
+.privacy-card {
+  max-width: 520px;
+  max-height: min(88dvh, 720px);
+  overflow-y: auto;
+  text-align: left;
+}
+
+.privacy-card .overlay-icon,
+.privacy-card .overlay-title { text-align: center; }
+
+.privacy-intro {
+  margin-bottom: 14px;
+  font-size: 0.88rem;
+  line-height: 1.7;
+  color: var(--text-2);
+}
+
+.privacy-list {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.privacy-list li {
+  position: relative;
+  padding-left: 1.5em;
+  font-size: 0.87rem;
+  line-height: 1.7;
+  color: var(--text-2);
+}
+
+.privacy-list li::before {
+  content: "•";
+  position: absolute;
+  left: 0.35em;
+  top: 0;
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.privacy-list li.is-key {
+  font-weight: 650;
+  color: var(--text);
+}
+
+.privacy-foot {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 0.76rem;
+  line-height: 1.65;
+  color: var(--text-3);
+}
+
+.privacy-card .overlay-actions { margin-top: 20px; }
+
+/* =========================================================
+   新组件的深色模式补充
+   ========================================================= */
+@media (prefers-color-scheme: dark) {
+  .gauge-why { background: rgba(255, 255, 255, 0.05); }
+  .explain-panel { background: rgba(255, 255, 255, 0.04); }
+  .ex-bar { background: rgba(255, 255, 255, 0.12); }
+  .exposure-chip.exp-low { --exp-ink: #34d399; --exp-soft: rgba(16, 185, 129, 0.1); }
+  .exposure-chip.exp-medium { --exp-ink: #fbbf24; --exp-soft: rgba(245, 158, 11, 0.12); }
+  .exposure-chip.exp-high { --exp-ink: #f87171; --exp-soft: rgba(239, 68, 68, 0.12); }
+  .exposure-level { background: rgba(255, 255, 255, 0.06); }
+  .chat-chip { background: rgba(255, 255, 255, 0.04); }
+  .chat-msg.is-assistant { background: rgba(255, 255, 255, 0.05); }
+  .chat-msg.is-error { background: rgba(239, 68, 68, 0.14); }
+  .chat-input { background: rgba(255, 255, 255, 0.04); }
+}
+
+/* ---------- 新组件的窄屏优化 ---------- */
+@media (max-width: 420px) {
+  .ex-row { grid-template-columns: minmax(0, 1fr) 72px 20px; gap: 8px; }
+  .chat-card { padding: 18px 14px 14px; }
+  .chat-msg { max-width: 92%; }
+  .chat-send { min-width: 72px; padding: 0 0.9rem; }
 }
 
 /* =========================================================

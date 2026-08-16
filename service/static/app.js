@@ -7,10 +7,15 @@
  *   age(0-110) / sex(F|M) / day_ill(0-14)
  *   symptoms      —— 14 项，每项 yes | no | unknown
  *   comorbidities —— 7 项，每项 yes | no | unknown
+ *   exposure      —— 3 项，每项 yes | no | unknown（**不参与模型打分**）
  *   language / notes
  *
  * 「不知道」在模型里与「无」同为 0（训练数据 SINAN 9=未知 记 0），
  * 所以未作答可以直接提交，不强制用户回答症状题。
+ *
+ * 流行病学暴露（exposure）在 SINAN 训练数据里不存在，没有系数可用，
+ * 后端把它放进独立的规则通道 exposure_context，前端也必须区别呈现：
+ * 它不是模型评分，不能长得像仪表盘。
  * ========================================================= */
 
 const LANGS = [
@@ -31,16 +36,35 @@ const SYMPTOM_CODES = [
 const COMORB_CODES = [
   'DIABETES', 'HEMATOLOG', 'HEPATOPAT', 'RENAL', 'HIPERTENSA', 'ACIDO_PEPT', 'AUTO_IMUNE',
 ];
+// 流行病学暴露：走后端的规则通道，不进模型
+const EXPOSURE_CODES = ['FEVER_CLUSTER', 'CONFIRMED_CASE', 'OUTBREAK_TRAVEL'];
 
-// 六步问卷结构
+// 三态作答的字段类别（用于计数、批量填「无」等通用逻辑）
+const TRI_KINDS = ['symptoms', 'comorbidities', 'exposure'];
+
+// 模型贡献项里 5 个非二值特征（code 保留原名，不带 _x）
+const NON_BINARY_FEATS = ['age', 'sex_f', 'day_ill', 'wk_sin', 'wk_cos'];
+
+// 七步问卷结构（note 为 I18N 顶层键名）
 const STEPS = [
   { id: 'basic', kind: 'basic' },
   { id: 'common', kind: 'symptoms', codes: ['FEBRE', 'CEFALEIA', 'MIALGIA', 'ARTRALGIA', 'DOR_RETRO', 'DOR_COSTAS'] },
   { id: 'other', kind: 'symptoms', codes: ['NAUSEA', 'VOMITO', 'EXANTEMA', 'CONJUNTVIT', 'ARTRITE'] },
-  { id: 'clinical', kind: 'symptoms', codes: ['PETEQUIA_N', 'LACO', 'LEUCOPENIA'], note: true },
+  { id: 'clinical', kind: 'symptoms', codes: ['PETEQUIA_N', 'LACO', 'LEUCOPENIA'], note: 'clinicalNote' },
+  { id: 'exposure', kind: 'exposure', codes: EXPOSURE_CODES, note: 'exposureNote' },
   { id: 'history', kind: 'comorbidities', codes: COMORB_CODES },
   { id: 'notes', kind: 'notes' },
 ];
+
+// 结果页三个模型指标 ↔ explanations 的键
+const METRICS = ['dengue', 'worsening', 'severe'];
+
+// 建议展示顺序：就医 → 监测 → 防护（与后端 Advice 字段顺序一致）
+const ADVICE_ORDER = ['medical', 'monitoring', 'protection'];
+
+// 对话：最多回传最近 6 条历史，问题上限 500 字（与 app/schemas.py 一致）
+const CHAT_HISTORY_MAX = 6;
+const CHAT_QUESTION_MAX = 500;
 
 /* --------------------------------------------------------- 文案 */
 
@@ -49,13 +73,29 @@ const I18N = {
     docTitle: '登革热风险自测',
     metaDescription: '回答症状与病史问题，获得登革热风险参考评分与防护建议。结果仅供参考，不构成医疗诊断。',
     langLabel: '选择语言',
-    a11y: { points: '产品特色', progress: '问卷进度' },
+    a11y: { progress: '问卷进度', chatLog: '对话记录' },
     hero: {
       badge: '登革热 · 风险自评',
       title: '登革热<br />风险自测',
       subtitle: '回答症状与病史问题，获得风险参考与防护建议',
       cta: '开始评估',
-      points: ['🦟 登革热专用', '📊 真实数据建模', '🌏 五种语言'],
+      privacy: '无需注册，不收集个人信息；补充说明不会被保存。',
+      privacyLink: '隐私说明',
+    },
+    privacy: {
+      title: '隐私说明',
+      intro: '这个工具在设计上就不需要知道你是谁。以下是它对你的数据所做的全部事情：',
+      items: [
+        '无需注册、无需登录，不收集姓名、电话、邮箱等任何联系方式。',
+        '你的作答不会与任何身份信息关联。',
+        '「补充说明」里自由填写的文字不会被保存。',
+        '去标识化的作答与评分会被记录，用于改进模型校准。',
+        '不出售、也不与第三方共享你的数据。',
+        '启用 AI 建议时，你的作答摘要会发送给第三方大语言模型接口进行处理。',
+        '评估结果不是医疗诊断。',
+      ],
+      foot: '本说明描述本服务当前的实际运作方式；今后如有变化会同步更新。',
+      close: '知道了',
     },
     brand: '🦟 登革热风险自测',
     stepCounter: '第 {cur} 步 / 共 {total} 步',
@@ -64,10 +104,12 @@ const I18N = {
       common: { title: '常见症状', sub: '最近是否出现以下情况？' },
       other: { title: '其他症状', sub: '继续，还有几项' },
       clinical: { title: '出血与化验', sub: '需要医生检查的项目' },
+      exposure: { title: '周围环境与暴露', sub: '这几题问的是你身边的情况，不是你的身体' },
       history: { title: '既往病史', sub: '这些慢性病会提高重症风险' },
       notes: { title: '补充说明', sub: '还有什么想告诉我们的吗？（选填）' },
     },
     clinicalNote: '这几项通常需要医生检查或验血才能知道。不清楚就选「不知道」，不影响评估。',
+    exposureNote: '这几题描述的是你周围的环境，而不是你的身体。统计模型并不使用它们（训练数据里没有这些变量），它们只用于判断流行病学背景、并影响给你的建议。',
     fields: {
       age: '年龄', ageUnit: '岁',
       sex: '性别', sexF: '女', sexM: '男',
@@ -95,7 +137,24 @@ const I18N = {
       severe: '重症风险',
       worsening: '病情加重风险',
       levels: { low: '低风险', medium: '中风险', high: '高风险' },
-      advice: { protection: '🛡️ 防蚊与防护', medical: '🏥 就医提示', monitoring: '📋 居家监测' },
+      advice: { medical: '🏥 就医提示', monitoring: '📋 居家监测', protection: '🛡️ 防蚊与防护' },
+      explain: {
+        why: '为什么是这个分数？',
+        title: '{metric} · 影响最大的因素',
+        up: '推高评分',
+        down: '拉低评分',
+        caveat: '以上是模型对这个评分的线性贡献项：它解释分数是怎么算出来的，不代表病因。',
+        seasonal: '「季节性周期」只取决于当前是第几周，与你本人无关：它今天让每个人的评分都平移同样的量，互相比较时会抵消掉。',
+        empty: '这一项暂时没有可展示的贡献项。',
+      },
+      exposure: {
+        label: '周围暴露情况',
+        levels: { low: '低', medium: '中', high: '高' },
+        factors: '触发因素：{list}',
+        none: '你没有报告周围有相关的暴露情况。',
+        caption: '这是按规则判断的流行病学背景，不是模型输出，也不计入上面的评分。',
+        sep: '、',
+      },
       epiWeek: '评估周次：第 {week} 周',
       warning: {
         title: '出现登革热警示征象',
@@ -142,19 +201,70 @@ const I18N = {
       ACIDO_PEPT: { label: '消化性溃疡', desc: '胃溃疡或十二指肠溃疡' },
       AUTO_IMUNE: { label: '自身免疫疾病', desc: '如红斑狼疮、类风湿关节炎' },
     },
+    exposure: {
+      FEVER_CLUSTER: { label: '周围发热病例增多', desc: '家人、同事、同学或邻居中近期发热的人明显变多' },
+      CONFIRMED_CASE: { label: '身边有确诊病例', desc: '家庭、工作场所或社区里有人被确诊登革热' },
+      OUTBREAK_TRAVEL: { label: '暴发地区居住或旅行', desc: '近期到访过、或正居住在登革热暴发地区' },
+    },
+    features: {
+      age: '年龄',
+      sex_f: '女性',
+      day_ill: '症状持续天数',
+      wk_sin: '季节性周期（分量一）',
+      wk_cos: '季节性周期（分量二）',
+    },
+    chat: {
+      title: '追问一下',
+      sub: '针对上面的结果提问，AI 助手会用你选择的语言回答',
+      empty: '先从下面挑一个问题，或者直接输入你想问的。',
+      inputLabel: '你的问题',
+      placeholder: '输入你的问题…',
+      send: '发送',
+      typing: 'AI 正在回复…',
+      you: '你',
+      assistant: 'AI 助手',
+      note: '回答由 AI 生成，可能出错；你的作答摘要会发送给第三方模型接口处理。',
+      privacyLink: '隐私说明',
+      error: 'AI 助手暂时没能回答，请稍后重试。',
+      retry: '重试',
+      chips: [
+        '这些分数到底是什么意思？',
+        '我现在需要去看医生吗？',
+        '我应该特别留意哪些危险信号？',
+        '怎么保护家里其他人？',
+        '我很难受，为什么重症风险还是低？',
+        '这算是确诊吗？',
+      ],
+    },
   },
 
   'zh-TW': {
     docTitle: '登革熱風險自測',
     metaDescription: '回答症狀與病史問題，獲得登革熱風險參考評分與防護建議。結果僅供參考，不構成醫療診斷。',
     langLabel: '選擇語言',
-    a11y: { points: '產品特色', progress: '問卷進度' },
+    a11y: { progress: '問卷進度', chatLog: '對話紀錄' },
     hero: {
       badge: '登革熱 · 風險自評',
       title: '登革熱<br />風險自測',
       subtitle: '回答症狀與病史問題，獲得風險參考與防護建議',
       cta: '開始評估',
-      points: ['🦟 登革熱專用', '📊 真實資料建模', '🌏 五種語言'],
+      privacy: '無需註冊，不蒐集個人資訊；補充說明不會被保存。',
+      privacyLink: '隱私說明',
+    },
+    privacy: {
+      title: '隱私說明',
+      intro: '這個工具在設計上就不需要知道你是誰。以下是它對你的資料所做的全部事情：',
+      items: [
+        '無需註冊、無需登入，不蒐集姓名、電話、電子郵件等任何聯絡方式。',
+        '你的作答不會與任何身分資訊連結。',
+        '「補充說明」中自由填寫的文字不會被保存。',
+        '去識別化的作答與評分會被記錄，用於改進模型校準。',
+        '不販售、也不與第三方共享你的資料。',
+        '啟用 AI 建議時，你的作答摘要會傳送至第三方大型語言模型 API 進行處理。',
+        '評估結果不是醫療診斷。',
+      ],
+      foot: '本說明描述本服務目前的實際運作方式；日後如有變動會同步更新。',
+      close: '知道了',
     },
     brand: '🦟 登革熱風險自測',
     stepCounter: '第 {cur} 步 / 共 {total} 步',
@@ -163,10 +273,12 @@ const I18N = {
       common: { title: '常見症狀', sub: '最近是否出現以下情況？' },
       other: { title: '其他症狀', sub: '繼續，還有幾項' },
       clinical: { title: '出血與檢驗', sub: '需要醫師檢查的項目' },
+      exposure: { title: '周遭環境與暴露', sub: '這幾題問的是你身邊的狀況，不是你的身體' },
       history: { title: '過去病史', sub: '這些慢性病會提高重症風險' },
       notes: { title: '補充說明', sub: '還有什麼想告訴我們的嗎？（選填）' },
     },
     clinicalNote: '這幾項通常需要醫師檢查或抽血才會知道。不清楚就選「不知道」，不影響評估。',
+    exposureNote: '這幾題描述的是你周遭的環境，而不是你的身體。統計模型並不使用它們（訓練資料中沒有這些變項），它們只用來判斷流行病學背景，並影響給你的建議。',
     fields: {
       age: '年齡', ageUnit: '歲',
       sex: '性別', sexF: '女', sexM: '男',
@@ -194,7 +306,24 @@ const I18N = {
       severe: '重症風險',
       worsening: '病情加重風險',
       levels: { low: '低風險', medium: '中風險', high: '高風險' },
-      advice: { protection: '🛡️ 防蚊與防護', medical: '🏥 就醫提示', monitoring: '📋 居家監測' },
+      advice: { medical: '🏥 就醫提示', monitoring: '📋 居家監測', protection: '🛡️ 防蚊與防護' },
+      explain: {
+        why: '為什麼是這個分數？',
+        title: '{metric} · 影響最大的因素',
+        up: '推高評分',
+        down: '拉低評分',
+        caveat: '以上是模型對這個評分的線性貢獻項：它解釋分數是怎麼算出來的，不代表病因。',
+        seasonal: '「季節性週期」只取決於目前是第幾週，與你本人無關：它今天讓每個人的評分都平移相同的量，互相比較時會抵銷。',
+        empty: '這一項目前沒有可顯示的貢獻項。',
+      },
+      exposure: {
+        label: '周遭暴露情況',
+        levels: { low: '低', medium: '中', high: '高' },
+        factors: '觸發因素：{list}',
+        none: '你沒有回報周遭有相關的暴露情況。',
+        caption: '這是依規則判斷的流行病學背景，不是模型輸出，也不計入上方的評分。',
+        sep: '、',
+      },
       epiWeek: '評估週次：第 {week} 週',
       warning: {
         title: '出現登革熱警示徵象',
@@ -241,19 +370,70 @@ const I18N = {
       ACIDO_PEPT: { label: '消化性潰瘍', desc: '胃潰瘍或十二指腸潰瘍' },
       AUTO_IMUNE: { label: '自體免疫疾病', desc: '如紅斑性狼瘡、類風濕性關節炎' },
     },
+    exposure: {
+      FEVER_CLUSTER: { label: '周遭發燒病例增加', desc: '家人、同事、同學或鄰居近期發燒的人明顯變多' },
+      CONFIRMED_CASE: { label: '身邊有確診病例', desc: '家庭、工作場所或社區裡有人被確診登革熱' },
+      OUTBREAK_TRAVEL: { label: '疫情流行地區居住或旅遊', desc: '近期到訪過、或正居住於登革熱流行地區' },
+    },
+    features: {
+      age: '年齡',
+      sex_f: '女性',
+      day_ill: '症狀持續天數',
+      wk_sin: '季節性週期（分量一）',
+      wk_cos: '季節性週期（分量二）',
+    },
+    chat: {
+      title: '追問一下',
+      sub: '針對上面的結果提問，AI 助理會以你選擇的語言回答',
+      empty: '先從下面挑一個問題，或直接輸入你想問的。',
+      inputLabel: '你的問題',
+      placeholder: '輸入你的問題…',
+      send: '送出',
+      typing: 'AI 正在回覆…',
+      you: '你',
+      assistant: 'AI 助理',
+      note: '回答由 AI 產生，可能有誤；你的作答摘要會傳送至第三方模型 API 處理。',
+      privacyLink: '隱私說明',
+      error: 'AI 助理暫時無法回答，請稍後重試。',
+      retry: '重試',
+      chips: [
+        '這些分數到底代表什麼？',
+        '我現在需要去看醫師嗎？',
+        '我該特別留意哪些危險徵兆？',
+        '要怎麼保護家裡其他人？',
+        '我很不舒服，為什麼重症風險還是低？',
+        '這算是確診嗎？',
+      ],
+    },
   },
 
   en: {
     docTitle: 'Dengue Risk Self-Check',
     metaDescription: 'Answer questions about symptoms and medical history to get a dengue risk indicator and protection advice. For reference only, not a medical diagnosis.',
     langLabel: 'Select language',
-    a11y: { points: 'Highlights', progress: 'Questionnaire progress' },
+    a11y: { progress: 'Questionnaire progress', chatLog: 'Conversation' },
     hero: {
       badge: 'Dengue · Risk self-check',
       title: 'Dengue Risk<br />Self-Check',
       subtitle: 'Answer a few questions to get a risk indicator and protection advice',
       cta: 'Start assessment',
-      points: ['🦟 Dengue-specific', '📊 Built on real data', '🌏 Five languages'],
+      privacy: 'No account or personal details; free-text notes are never stored.',
+      privacyLink: 'Privacy',
+    },
+    privacy: {
+      title: 'Privacy notice',
+      intro: 'This tool is designed to work without knowing who you are. Here is everything it does with your data:',
+      items: [
+        'No account, no login. We do not collect your name, phone number, email or any other contact details.',
+        'Your answers are not linked to any identity.',
+        'Free-text notes are never stored.',
+        'De-identified answers and scores are logged so the model can be better calibrated.',
+        'Nothing is sold or shared with third parties.',
+        'When AI advice is enabled, a summary of your answers is sent to a third-party language-model API for processing.',
+        'Results are not a medical diagnosis.',
+      ],
+      foot: 'This notice describes how the service actually works today; it will be updated if that changes.',
+      close: 'Got it',
     },
     brand: '🦟 Dengue Risk Self-Check',
     stepCounter: 'Step {cur} of {total}',
@@ -262,10 +442,12 @@ const I18N = {
       common: { title: 'Common symptoms', sub: 'Have you had any of these recently?' },
       other: { title: 'Other symptoms', sub: 'Almost there — a few more' },
       clinical: { title: 'Bleeding & lab findings', sub: 'Items that usually require a clinician' },
+      exposure: { title: 'Surroundings & exposure', sub: 'These ask about the people and places around you, not about your body' },
       history: { title: 'Medical history', sub: 'These conditions raise the risk of severe disease' },
       notes: { title: 'Anything else', sub: 'Optional — tell us more in your own words' },
     },
     clinicalNote: 'These usually require a doctor’s exam or a blood test. If you are not sure, choose "Don’t know" — it will not distort the result.',
+    exposureNote: 'These questions describe your surroundings rather than your own body. The statistical model does not use them — the variables do not exist in its training data. They are used to judge the epidemiological context and to shape the guidance you receive.',
     fields: {
       age: 'Age', ageUnit: 'years',
       sex: 'Sex', sexF: 'Female', sexM: 'Male',
@@ -293,7 +475,24 @@ const I18N = {
       severe: 'Severe-disease risk',
       worsening: 'Risk of worsening',
       levels: { low: 'Low risk', medium: 'Moderate risk', high: 'High risk' },
-      advice: { protection: '🛡️ Mosquito protection', medical: '🏥 When to seek care', monitoring: '📋 Monitoring at home' },
+      advice: { medical: '🏥 When to seek care', monitoring: '📋 Monitoring at home', protection: '🛡️ Mosquito protection' },
+      explain: {
+        why: 'Why this score?',
+        title: '{metric} · largest contributors',
+        up: 'raises the score',
+        down: 'lowers the score',
+        caveat: 'These are the model’s linear contributions to this score. They explain how the number was computed — they are not causes of your illness.',
+        seasonal: 'The seasonal pattern depends only on the current week, not on you: today it shifts everyone’s score by the same amount, so it cancels out when scores are compared.',
+        empty: 'No contributors are available for this score.',
+      },
+      exposure: {
+        label: 'Surrounding exposure',
+        levels: { low: 'Low', medium: 'Medium', high: 'High' },
+        factors: 'Triggered by: {list}',
+        none: 'You did not report any relevant exposure around you.',
+        caption: 'Epidemiological context assessed by rule, not model output. It is not part of the scores above.',
+        sep: ', ',
+      },
       epiWeek: 'Assessment week: week {week}',
       warning: {
         title: 'Dengue warning sign present',
@@ -340,19 +539,70 @@ const I18N = {
       ACIDO_PEPT: { label: 'Peptic ulcer disease', desc: 'Stomach or duodenal ulcer' },
       AUTO_IMUNE: { label: 'Autoimmune disease', desc: 'e.g. lupus, rheumatoid arthritis' },
     },
+    exposure: {
+      FEVER_CLUSTER: { label: 'Cluster of fever cases nearby', desc: 'An unusual increase in fever cases among the people around you — family, school, workplace or neighbourhood' },
+      CONFIRMED_CASE: { label: 'Confirmed dengue case nearby', desc: 'Someone in your household, workplace or neighbourhood has been diagnosed with dengue' },
+      OUTBREAK_TRAVEL: { label: 'Outbreak area', desc: 'You live in, or have recently travelled to, an area with a dengue outbreak' },
+    },
+    features: {
+      age: 'Age',
+      sex_f: 'Female sex',
+      day_ill: 'Days since symptoms began',
+      wk_sin: 'Seasonal pattern (component 1)',
+      wk_cos: 'Seasonal pattern (component 2)',
+    },
+    chat: {
+      title: 'Ask about your result',
+      sub: 'Ask anything about the result above — the AI assistant replies in your chosen language',
+      empty: 'Pick a question below, or type your own.',
+      inputLabel: 'Your question',
+      placeholder: 'Type your question…',
+      send: 'Send',
+      typing: 'Assistant is replying…',
+      you: 'You',
+      assistant: 'Assistant',
+      note: 'Replies are AI-generated and can be wrong. A summary of your answers is sent to a third-party model API.',
+      privacyLink: 'Privacy',
+      error: 'The assistant could not answer just now. Please try again.',
+      retry: 'Retry',
+      chips: [
+        'What do these scores actually mean?',
+        'Should I see a doctor now?',
+        'What warning signs should I watch for?',
+        'How do I protect my family?',
+        'Why is my severity score low when I feel awful?',
+        'Is this a diagnosis?',
+      ],
+    },
   },
 
   es: {
     docTitle: 'Autoevaluación de riesgo de dengue',
     metaDescription: 'Responda preguntas sobre síntomas y antecedentes para obtener un indicador de riesgo de dengue y recomendaciones de protección. Solo orientativo, no es un diagnóstico médico.',
     langLabel: 'Seleccionar idioma',
-    a11y: { points: 'Características', progress: 'Progreso del cuestionario' },
+    a11y: { progress: 'Progreso del cuestionario', chatLog: 'Conversación' },
     hero: {
       badge: 'Dengue · Autoevaluación de riesgo',
       title: 'Riesgo de dengue<br />Autoevaluación',
       subtitle: 'Responda unas preguntas y obtenga un indicador de riesgo y consejos de protección',
       cta: 'Comenzar evaluación',
-      points: ['🦟 Específico para dengue', '📊 Basado en datos reales', '🌏 Cinco idiomas'],
+      privacy: 'Sin cuenta ni datos personales; los comentarios libres nunca se almacenan.',
+      privacyLink: 'Privacidad',
+    },
+    privacy: {
+      title: 'Aviso de privacidad',
+      intro: 'Esta herramienta está diseñada para funcionar sin saber quién es usted. Esto es todo lo que hace con sus datos:',
+      items: [
+        'Sin cuenta ni inicio de sesión. No recogemos su nombre, teléfono, correo electrónico ni ningún otro dato de contacto.',
+        'Sus respuestas no se vinculan a ninguna identidad.',
+        'El texto libre de los comentarios nunca se almacena.',
+        'Las respuestas y puntuaciones anonimizadas se registran para mejorar la calibración del modelo.',
+        'No vendemos ni compartimos sus datos con terceros.',
+        'Cuando las recomendaciones con IA están activadas, se envía un resumen de sus respuestas a una API de modelo de lenguaje de terceros para su procesamiento.',
+        'Los resultados no son un diagnóstico médico.',
+      ],
+      foot: 'Este aviso describe cómo funciona el servicio en la actualidad; se actualizará si eso cambia.',
+      close: 'Entendido',
     },
     brand: '🦟 Autoevaluación de dengue',
     stepCounter: 'Paso {cur} de {total}',
@@ -361,10 +611,12 @@ const I18N = {
       common: { title: 'Síntomas frecuentes', sub: '¿Ha presentado alguno de estos últimamente?' },
       other: { title: 'Otros síntomas', sub: 'Continuemos, faltan pocos' },
       clinical: { title: 'Sangrado y laboratorio', sub: 'Requieren valoración médica' },
+      exposure: { title: 'Entorno y exposición', sub: 'Estas preguntas son sobre lo que ocurre a su alrededor, no sobre su cuerpo' },
       history: { title: 'Antecedentes médicos', sub: 'Estas enfermedades aumentan el riesgo de gravedad' },
       notes: { title: 'Comentarios', sub: 'Opcional: cuéntenos algo más con sus palabras' },
     },
     clinicalNote: 'Estos datos suelen requerir revisión médica o análisis de sangre. Si no lo sabe, elija «No sé»: no afectará al resultado.',
+    exposureNote: 'Estas preguntas describen su entorno, no su cuerpo. El modelo estadístico no las utiliza —esas variables no existen en sus datos de entrenamiento—: sirven para valorar el contexto epidemiológico y orientar las recomendaciones que recibe.',
     fields: {
       age: 'Edad', ageUnit: 'años',
       sex: 'Sexo', sexF: 'Mujer', sexM: 'Hombre',
@@ -392,7 +644,24 @@ const I18N = {
       severe: 'Riesgo de gravedad',
       worsening: 'Riesgo de empeoramiento',
       levels: { low: 'Riesgo bajo', medium: 'Riesgo moderado', high: 'Riesgo alto' },
-      advice: { protection: '🛡️ Protección contra mosquitos', medical: '🏥 Cuándo buscar atención', monitoring: '📋 Vigilancia en casa' },
+      advice: { medical: '🏥 Cuándo buscar atención', monitoring: '📋 Vigilancia en casa', protection: '🛡️ Protección contra mosquitos' },
+      explain: {
+        why: '¿Por qué esta puntuación?',
+        title: '{metric} · factores más influyentes',
+        up: 'aumenta la puntuación',
+        down: 'reduce la puntuación',
+        caveat: 'Son las contribuciones lineales del modelo a esta puntuación: explican cómo se calculó la cifra, no son causas de su enfermedad.',
+        seasonal: 'El patrón estacional depende solo de la semana del año, no de usted: hoy desplaza por igual la puntuación de todas las personas, así que se cancela al comparar.',
+        empty: 'No hay factores disponibles para esta puntuación.',
+      },
+      exposure: {
+        label: 'Exposición en su entorno',
+        levels: { low: 'Baja', medium: 'Media', high: 'Alta' },
+        factors: 'Motivos: {list}',
+        none: 'No ha indicado ninguna exposición relevante en su entorno.',
+        caption: 'Contexto epidemiológico determinado por reglas, no es resultado del modelo ni forma parte de las puntuaciones anteriores.',
+        sep: ', ',
+      },
       epiWeek: 'Semana de evaluación: semana {week}',
       warning: {
         title: 'Signo de alarma de dengue presente',
@@ -439,19 +708,70 @@ const I18N = {
       ACIDO_PEPT: { label: 'Enfermedad ácido-péptica', desc: 'Úlcera gástrica o duodenal' },
       AUTO_IMUNE: { label: 'Enfermedad autoinmune', desc: 'Ej.: lupus, artritis reumatoide' },
     },
+    exposure: {
+      FEVER_CLUSTER: { label: 'Aumento de casos de fiebre cerca', desc: 'Un aumento inusual de casos de fiebre entre las personas de su entorno: familia, escuela, trabajo o vecindario' },
+      CONFIRMED_CASE: { label: 'Caso confirmado de dengue cerca', desc: 'Alguien de su hogar, trabajo o vecindario ha sido diagnosticado de dengue' },
+      OUTBREAK_TRAVEL: { label: 'Zona con brote', desc: 'Vive en una zona con brote de dengue o ha viajado a una recientemente' },
+    },
+    features: {
+      age: 'Edad',
+      sex_f: 'Sexo femenino',
+      day_ill: 'Días desde el inicio de los síntomas',
+      wk_sin: 'Patrón estacional (componente 1)',
+      wk_cos: 'Patrón estacional (componente 2)',
+    },
+    chat: {
+      title: 'Pregunte sobre su resultado',
+      sub: 'Pregunte lo que quiera sobre el resultado anterior; el asistente de IA responde en el idioma elegido',
+      empty: 'Elija una pregunta de abajo o escriba la suya.',
+      inputLabel: 'Su pregunta',
+      placeholder: 'Escriba su pregunta…',
+      send: 'Enviar',
+      typing: 'El asistente está respondiendo…',
+      you: 'Usted',
+      assistant: 'Asistente',
+      note: 'Las respuestas las genera una IA y pueden ser incorrectas. Se envía un resumen de sus respuestas a una API de modelo de terceros.',
+      privacyLink: 'Privacidad',
+      error: 'El asistente no ha podido responder ahora mismo. Inténtelo de nuevo.',
+      retry: 'Reintentar',
+      chips: [
+        '¿Qué significan realmente estas puntuaciones?',
+        '¿Debo ir al médico ahora?',
+        '¿Qué signos de alarma debo vigilar?',
+        '¿Cómo protejo a mi familia?',
+        'Me siento fatal, ¿por qué mi riesgo de gravedad es bajo?',
+        '¿Esto es un diagnóstico?',
+      ],
+    },
   },
 
   pt: {
     docTitle: 'Autoavaliação de risco de dengue',
     metaDescription: 'Responda a perguntas sobre sintomas e histórico para obter um indicador de risco de dengue e orientações de proteção. Apenas para referência, não é um diagnóstico médico.',
     langLabel: 'Selecionar idioma',
-    a11y: { points: 'Destaques', progress: 'Progresso do questionário' },
+    a11y: { progress: 'Progresso do questionário', chatLog: 'Conversa' },
     hero: {
       badge: 'Dengue · Autoavaliação de risco',
       title: 'Risco de dengue<br />Autoavaliação',
       subtitle: 'Responda a algumas perguntas e receba um indicador de risco e orientações',
       cta: 'Iniciar avaliação',
-      points: ['🦟 Específico para dengue', '📊 Baseado em dados reais', '🌏 Cinco idiomas'],
+      privacy: 'Sem cadastro nem dados pessoais; as observações livres nunca são armazenadas.',
+      privacyLink: 'Privacidade',
+    },
+    privacy: {
+      title: 'Aviso de privacidade',
+      intro: 'Esta ferramenta foi feita para funcionar sem saber quem você é. Isto é tudo o que ela faz com os seus dados:',
+      items: [
+        'Sem cadastro nem login. Não coletamos nome, telefone, e-mail nem qualquer outro dado de contato.',
+        'Suas respostas não são vinculadas a nenhuma identidade.',
+        'O texto livre das observações nunca é armazenado.',
+        'Respostas e pontuações não identificadas são registradas para melhorar a calibração do modelo.',
+        'Nada é vendido nem compartilhado com terceiros.',
+        'Quando as orientações por IA estão ativadas, um resumo das suas respostas é enviado a uma API de modelo de linguagem de terceiros para processamento.',
+        'Os resultados não são um diagnóstico médico.',
+      ],
+      foot: 'Este aviso descreve como o serviço funciona hoje; será atualizado caso isso mude.',
+      close: 'Entendi',
     },
     brand: '🦟 Autoavaliação de dengue',
     stepCounter: 'Etapa {cur} de {total}',
@@ -460,10 +780,12 @@ const I18N = {
       common: { title: 'Sintomas comuns', sub: 'Apresentou algum destes recentemente?' },
       other: { title: 'Outros sintomas', sub: 'Vamos continuar, faltam poucos' },
       clinical: { title: 'Sangramento e exames', sub: 'Itens que costumam exigir avaliação médica' },
+      exposure: { title: 'Ambiente e exposição', sub: 'Estas perguntas são sobre o que acontece ao seu redor, não sobre o seu corpo' },
       history: { title: 'Histórico médico', sub: 'Estas condições aumentam o risco de gravidade' },
       notes: { title: 'Observações', sub: 'Opcional: conte-nos mais com suas palavras' },
     },
     clinicalNote: 'Estes itens geralmente exigem exame médico ou de sangue. Se não souber, escolha «Não sei» — isso não prejudica o resultado.',
+    exposureNote: 'Estas perguntas descrevem o seu entorno, não o seu corpo. O modelo estatístico não as utiliza — essas variáveis não existem nos dados de treinamento. Elas servem para avaliar o contexto epidemiológico e orientar as recomendações que você recebe.',
     fields: {
       age: 'Idade', ageUnit: 'anos',
       sex: 'Sexo', sexF: 'Feminino', sexM: 'Masculino',
@@ -491,7 +813,24 @@ const I18N = {
       severe: 'Risco de gravidade',
       worsening: 'Risco de piora',
       levels: { low: 'Risco baixo', medium: 'Risco moderado', high: 'Risco alto' },
-      advice: { protection: '🛡️ Proteção contra mosquitos', medical: '🏥 Quando procurar atendimento', monitoring: '📋 Monitoramento em casa' },
+      advice: { medical: '🏥 Quando procurar atendimento', monitoring: '📋 Monitoramento em casa', protection: '🛡️ Proteção contra mosquitos' },
+      explain: {
+        why: 'Por que esta pontuação?',
+        title: '{metric} · fatores de maior peso',
+        up: 'aumenta a pontuação',
+        down: 'reduz a pontuação',
+        caveat: 'São as contribuições lineares do modelo para esta pontuação: explicam como o número foi calculado, não são causas da sua doença.',
+        seasonal: 'O padrão sazonal depende apenas da semana do ano, não de você: hoje ele desloca igualmente a pontuação de todas as pessoas, portanto se cancela na comparação.',
+        empty: 'Não há fatores disponíveis para esta pontuação.',
+      },
+      exposure: {
+        label: 'Exposição ao seu redor',
+        levels: { low: 'Baixa', medium: 'Média', high: 'Alta' },
+        factors: 'Motivos: {list}',
+        none: 'Você não relatou nenhuma exposição relevante ao seu redor.',
+        caption: 'Contexto epidemiológico definido por regra, não é saída do modelo nem entra nas pontuações acima.',
+        sep: ', ',
+      },
       epiWeek: 'Semana da avaliação: semana {week}',
       warning: {
         title: 'Sinal de alarme de dengue presente',
@@ -538,8 +877,46 @@ const I18N = {
       ACIDO_PEPT: { label: 'Doença ácido-péptica', desc: 'Úlcera gástrica ou duodenal' },
       AUTO_IMUNE: { label: 'Doença autoimune', desc: 'Ex.: lúpus, artrite reumatoide' },
     },
+    exposure: {
+      FEVER_CLUSTER: { label: 'Aumento de casos de febre por perto', desc: 'Aumento incomum de casos de febre entre as pessoas ao seu redor: família, escola, trabalho ou vizinhança' },
+      CONFIRMED_CASE: { label: 'Caso confirmado de dengue por perto', desc: 'Alguém da sua casa, do trabalho ou da vizinhança foi diagnosticado com dengue' },
+      OUTBREAK_TRAVEL: { label: 'Área com surto', desc: 'Você mora em uma área com surto de dengue ou viajou para uma recentemente' },
+    },
+    features: {
+      age: 'Idade',
+      sex_f: 'Sexo feminino',
+      day_ill: 'Dias desde o início dos sintomas',
+      wk_sin: 'Padrão sazonal (componente 1)',
+      wk_cos: 'Padrão sazonal (componente 2)',
+    },
+    chat: {
+      title: 'Pergunte sobre o seu resultado',
+      sub: 'Pergunte o que quiser sobre o resultado acima; o assistente de IA responde no idioma escolhido',
+      empty: 'Escolha uma pergunta abaixo ou escreva a sua.',
+      inputLabel: 'Sua pergunta',
+      placeholder: 'Escreva sua pergunta…',
+      send: 'Enviar',
+      typing: 'O assistente está respondendo…',
+      you: 'Você',
+      assistant: 'Assistente',
+      note: 'As respostas são geradas por IA e podem estar erradas. Um resumo das suas respostas é enviado a uma API de modelo de terceiros.',
+      privacyLink: 'Privacidade',
+      error: 'O assistente não conseguiu responder agora. Tente novamente.',
+      retry: 'Tentar novamente',
+      chips: [
+        'O que essas pontuações realmente significam?',
+        'Devo procurar um médico agora?',
+        'Quais sinais de alarme devo observar?',
+        'Como protejo minha família?',
+        'Me sinto péssimo, por que meu risco de gravidade está baixo?',
+        'Isto é um diagnóstico?',
+      ],
+    },
   },
 };
+
+// 隐私条目里需要加粗的两条（各语言顺序一致）：不保存自由文本、AI 会外发摘要
+const PRIVACY_KEY_ITEMS = [2, 5];
 
 /* --------------------------------------------------------- 状态 */
 
@@ -548,7 +925,13 @@ function freshAnswers() {
   SYMPTOM_CODES.forEach((c) => { symptoms[c] = 'unknown'; });
   const comorbidities = {};
   COMORB_CODES.forEach((c) => { comorbidities[c] = 'unknown'; });
-  return { symptoms, comorbidities, age: 30, sex: null, dayIll: 2, notes: '' };
+  const exposure = {};
+  EXPOSURE_CODES.forEach((c) => { exposure[c] = 'unknown'; });
+  return { symptoms, comorbidities, exposure, age: 30, sex: null, dayIll: 2, notes: '' };
+}
+
+function freshChat() {
+  return { messages: [], sending: false };
 }
 
 const state = {
@@ -556,11 +939,15 @@ const state = {
   step: 0,
   answers: freshAnswers(),
   submitting: false,
+  // 三个贡献项面板的展开状态（切换语言后要保留）
+  openExplain: { dengue: false, worsening: false, severe: false },
+  chat: freshChat(),
 };
 
 let lastResult = null;
 let lastError = null;
 let loadingTimer = null;
+let lastFocusBeforeModal = null;
 
 /* --------------------------------------------------------- 工具 */
 
@@ -569,7 +956,24 @@ const T = () => I18N[state.lang];
 const fmt = (tpl, vars) => tpl.replace(/\{(\w+)\}/g, (_, k) => (k in vars ? vars[k] : `{${k}}`));
 
 function itemText(kind, code) {
-  return T()[kind][code] || { label: code, desc: '' };
+  const bag = T()[kind];
+  return (bag && bag[code]) || { label: code, desc: '' };
+}
+
+/**
+ * 把后端 explanations 里的 code 翻译成人话。
+ * 症状 / 合并症去掉 _x 后查表；5 个非二值特征查 features 表。
+ */
+function featureLabel(code) {
+  const t = T();
+  const raw = String(code || '');
+  const base = raw.replace(/_x$/, '');
+  if (NON_BINARY_FEATS.indexOf(raw) !== -1 && t.features[raw]) return t.features[raw];
+  if (t.symptoms[base]) return t.symptoms[base].label;
+  if (t.comorbidities[base]) return t.comorbidities[base].label;
+  if (t.exposure[base]) return t.exposure[base].label;
+  if (t.features[base]) return t.features[base];
+  return base;
 }
 
 function mapNavLang(tag) {
@@ -631,14 +1035,9 @@ function setLanguage(code) {
   $('hero-title').innerHTML = t.hero.title;
   $('hero-subtitle').textContent = t.hero.subtitle;
   $('btn-start-text').textContent = t.hero.cta;
-  const points = $('hero-points');
-  points.setAttribute('aria-label', t.a11y.points);
-  points.replaceChildren(...t.hero.points.map((p) => {
-    const li = document.createElement('li');
-    li.textContent = p;
-    return li;
-  }));
   $('hero-disclaimer').textContent = t.disclaimer;
+  $('hero-privacy-text').textContent = t.hero.privacy;
+  $('btn-privacy').textContent = t.hero.privacyLink;
 
   // Wizard 静态部分
   $('wizard-brand').textContent = t.brand;
@@ -654,13 +1053,32 @@ function setLanguage(code) {
   $('label-dengue').textContent = t.result.dengue;
   $('label-severe').textContent = t.result.severe;
   $('label-worsening').textContent = t.result.worsening;
+  $('why-dengue').textContent = t.result.explain.why;
+  $('why-severe').textContent = t.result.explain.why;
+  $('exposure-label').textContent = t.result.exposure.label;
+  $('exposure-caption').textContent = t.result.exposure.caption;
   $('btn-restart').textContent = t.result.restart;
   $('btn-home').textContent = t.result.home;
+
+  // 对话面板静态部分
+  $('chat-title').textContent = t.chat.title;
+  $('chat-sub').textContent = t.chat.sub;
+  $('chat-empty').textContent = t.chat.empty;
+  $('chat-log').setAttribute('aria-label', t.a11y.chatLog);
+  $('chat-input-label').textContent = t.chat.inputLabel;
+  $('chat-input').placeholder = t.chat.placeholder;
+  $('chat-input').setAttribute('aria-label', t.chat.inputLabel);
+  $('chat-send').textContent = t.chat.send;
+  $('chat-note').textContent = t.chat.note;
+  $('btn-privacy-chat').textContent = t.chat.privacyLink;
 
   // 错误浮层
   $('error-title').textContent = t.errors.title;
   $('btn-retry').textContent = t.errors.retry;
   $('btn-error-close').textContent = t.errors.back;
+
+  // 隐私浮层
+  renderPrivacy();
 
   // 免责声明（结果页优先用后端返回的）
   $('disclaimer-bar').textContent =
@@ -670,12 +1088,14 @@ function setLanguage(code) {
   if (!$('view-wizard').hidden) renderStep(null);
   if (!$('view-result').hidden && lastResult) renderResult(lastResult, { animate: false });
   if (!$('error-overlay').hidden && lastError) renderError();
+  renderChatChips();
+  renderChatLog();
 }
 
 /* --------------------------------------------------------- 问卷渲染 */
 
 function answeredCount(step) {
-  if (step.kind !== 'symptoms' && step.kind !== 'comorbidities') return null;
+  if (TRI_KINDS.indexOf(step.kind) === -1) return null;
   const bag = state.answers[step.kind];
   const done = step.codes.filter((c) => bag[c] !== 'unknown').length;
   return { done, total: step.codes.length };
@@ -884,11 +1304,11 @@ function renderStep(direction) {
   head.append(h2, sub);
   wrap.appendChild(head);
 
-  // 临床项提示
-  if (step.note) {
+  // 步骤补充说明（临床项 / 流行病学暴露）
+  if (step.note && t[step.note]) {
     const note = document.createElement('p');
     note.className = 'step-note';
-    note.textContent = t.clinicalNote;
+    note.textContent = t[step.note];
     wrap.appendChild(note);
   }
 
@@ -993,6 +1413,8 @@ function buildPayload() {
     day_ill: a.dayIll,
     symptoms: { ...a.symptoms },
     comorbidities: { ...a.comorbidities },
+    // 不参与模型打分，后端用规则转成 exposure_context
+    exposure: { ...a.exposure },
     language: state.lang,
     notes: a.notes.trim().slice(0, 500),
   };
@@ -1050,6 +1472,11 @@ async function submit() {
       return;
     }
     lastResult = data;
+    // 新结果 = 新会话：清空追问记录与展开状态
+    state.chat = freshChat();
+    METRICS.forEach((m) => { state.openExplain[m] = false; });
+    $('chat-input').value = '';
+    updateChatCounter();
     showView('result');
     renderResult(data, { animate: true });
   } catch (_) {
@@ -1158,10 +1585,16 @@ function renderResult(data, { animate }) {
     : '';
   $('disclaimer-bar').textContent = data.disclaimer || t.disclaimer;
 
-  // 建议卡片
+  // 流行病学暴露背景（规则判断）
+  renderExposure(data.exposure_context);
+
+  // 模型贡献项面板（可展开）
+  renderAllExplanations(data.explanations);
+
+  // 建议卡片：就医 → 监测 → 防护
   const host = $('advice-cards');
   host.replaceChildren();
-  ['protection', 'medical', 'monitoring'].forEach((key, idx) => {
+  ADVICE_ORDER.forEach((key, idx) => {
     const items = (data.advice && data.advice[key]) || [];
     if (!items.length) return;
     const card = document.createElement('section');
@@ -1169,6 +1602,8 @@ function renderResult(data, { animate }) {
     if (animate && !prefersReducedMotion()) {
       card.classList.add('fade-up');
       card.style.animationDelay = `${0.12 * idx}s`;
+    } else {
+      card.style.opacity = '1';
     }
     const h3 = document.createElement('h3');
     h3.className = 'advice-title';
@@ -1183,6 +1618,162 @@ function renderResult(data, { animate }) {
     card.append(h3, ul);
     host.appendChild(card);
   });
+
+  // 追问对话
+  renderChatChips();
+  renderChatLog();
+}
+
+/* --------------------------------------------------------- 暴露背景 */
+
+function renderExposure(ctx) {
+  const t = T().result.exposure;
+  const chip = $('exposure-chip');
+  const level = ctx && ctx.level;
+
+  if (!level || !t.levels[level]) {
+    chip.hidden = true;
+    return;
+  }
+
+  chip.classList.remove('exp-low', 'exp-medium', 'exp-high');
+  chip.classList.add(`exp-${level}`);
+  $('exposure-label').textContent = t.label;
+  $('exposure-level').textContent = t.levels[level];
+
+  const factors = Array.isArray(ctx.factors) ? ctx.factors : [];
+  const names = factors.map((c) => itemText('exposure', c).label);
+  $('exposure-factors').textContent = names.length
+    ? fmt(t.factors, { list: names.join(t.sep) })
+    : t.none;
+  $('exposure-caption').textContent = t.caption;
+  chip.hidden = false;
+}
+
+/* --------------------------------------------------------- 「为什么是这个分数」 */
+
+// 指标 ↔ DOM 的映射：触发按钮、面板、指标名的 I18N 键
+const EXPLAIN_TARGETS = {
+  dengue: { trigger: 'gauge-dengue', panel: 'explain-dengue', name: 'dengue' },
+  worsening: { trigger: 'btn-explain-worsening', panel: 'explain-worsening', name: 'worsening' },
+  severe: { trigger: 'gauge-severe', panel: 'explain-severe', name: 'severe' },
+};
+
+function explanationList(all, metric) {
+  const list = all && all[metric];
+  if (!Array.isArray(list)) return [];
+  return list.filter((it) => it && typeof it === 'object');
+}
+
+function renderAllExplanations(all) {
+  METRICS.forEach((metric) => {
+    const target = EXPLAIN_TARGETS[metric];
+    const items = explanationList(all, metric);
+    const trigger = $(target.trigger);
+    const panel = $(target.panel);
+
+    // 没有贡献项就别假装可以点开
+    if (!items.length) {
+      state.openExplain[metric] = false;
+      trigger.disabled = true;
+      trigger.setAttribute('aria-expanded', 'false');
+      panel.hidden = true;
+      panel.replaceChildren();
+      return;
+    }
+
+    trigger.disabled = false;
+    const open = !!state.openExplain[metric];
+    trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+    panel.replaceChildren(buildExplainPanel(metric, items));
+    panel.hidden = !open;
+  });
+}
+
+function buildExplainPanel(metric, items) {
+  const t = T();
+  const ex = t.result.explain;
+  const frag = document.createDocumentFragment();
+
+  const title = document.createElement('p');
+  title.className = 'explain-title';
+  title.textContent = fmt(ex.title, { metric: t.result[metric] });
+  frag.appendChild(title);
+
+  const sub = document.createElement('p');
+  sub.className = 'explain-sub';
+  sub.textContent = `${ex.up} ↑ · ${ex.down} ↓`;
+  frag.appendChild(sub);
+
+  const max = items.reduce(
+    (acc, it) => Math.max(acc, Math.abs(Number(it.contribution) || 0)),
+    0,
+  );
+
+  const list = document.createElement('div');
+  list.className = 'ex-list';
+  let hasSeasonal = false;
+
+  items.forEach((it) => {
+    const value = Math.abs(Number(it.contribution) || 0);
+    const dir = it.direction === 'down' ? 'down' : 'up';
+    if (it.code === 'wk_sin' || it.code === 'wk_cos') hasSeasonal = true;
+
+    const row = document.createElement('div');
+    row.className = 'ex-row';
+
+    const name = document.createElement('span');
+    name.className = 'ex-name';
+    name.textContent = featureLabel(it.code || it.feature);
+
+    const bar = document.createElement('span');
+    bar.className = 'ex-bar';
+    const fill = document.createElement('span');
+    fill.className = `ex-fill dir-${dir}`;
+    // 宽度只表示同一列表内的相对大小，最小 6% 保证可见
+    const pct = max > 0 ? Math.max(6, Math.round((value / max) * 100)) : 6;
+    fill.style.width = `${pct}%`;
+    bar.appendChild(fill);
+
+    const arrow = document.createElement('span');
+    arrow.className = `ex-dir dir-${dir}`;
+    const glyph = document.createElement('span');
+    glyph.setAttribute('aria-hidden', 'true');
+    glyph.textContent = dir === 'down' ? '↓' : '↑';
+    const sr = document.createElement('span');
+    sr.className = 'sr-only';
+    sr.textContent = dir === 'down' ? ex.down : ex.up;
+    arrow.append(glyph, sr);
+
+    row.append(name, bar, arrow);
+    list.appendChild(row);
+  });
+
+  frag.appendChild(list);
+
+  const caveat = document.createElement('p');
+  caveat.className = 'explain-note';
+  caveat.textContent = ex.caveat;
+  frag.appendChild(caveat);
+
+  if (hasSeasonal) {
+    const seasonal = document.createElement('p');
+    seasonal.className = 'explain-note';
+    seasonal.textContent = ex.seasonal;
+    frag.appendChild(seasonal);
+  }
+
+  return frag;
+}
+
+function toggleExplain(metric) {
+  const target = EXPLAIN_TARGETS[metric];
+  const trigger = $(target.trigger);
+  if (trigger.disabled) return;
+  const open = !state.openExplain[metric];
+  state.openExplain[metric] = open;
+  trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+  $(target.panel).hidden = !open;
 }
 
 /* --------------------------------------------------------- 错误 */
@@ -1214,16 +1805,247 @@ function hideErrorOverlay() {
   lastError = null;
 }
 
+/* --------------------------------------------------------- 隐私说明浮层 */
+
+function renderPrivacy() {
+  const t = T().privacy;
+  $('privacy-title').textContent = t.title;
+  $('privacy-intro').textContent = t.intro;
+  $('privacy-list').replaceChildren(...t.items.map((text, i) => {
+    const li = document.createElement('li');
+    if (PRIVACY_KEY_ITEMS.indexOf(i) !== -1) li.className = 'is-key';
+    li.textContent = text;
+    return li;
+  }));
+  $('privacy-foot').textContent = t.foot;
+  $('btn-privacy-close').textContent = t.close;
+}
+
+function openPrivacy() {
+  renderPrivacy();
+  lastFocusBeforeModal = document.activeElement;
+  $('privacy-overlay').hidden = false;
+  $('btn-privacy-close').focus();
+}
+
+function closePrivacy() {
+  if ($('privacy-overlay').hidden) return;
+  $('privacy-overlay').hidden = true;
+  const back = lastFocusBeforeModal;
+  lastFocusBeforeModal = null;
+  if (back && typeof back.focus === 'function' && document.contains(back)) {
+    back.focus();
+  }
+}
+
+/* --------------------------------------------------------- 追问对话 */
+
+function chatContext() {
+  const a = state.answers;
+  const r = lastResult || {};
+  const levels = ['low', 'medium', 'high'];
+  const ctx = {
+    warning_signs: Array.isArray(r.warning_signs) ? r.warning_signs : [],
+    exposure_level:
+      (r.exposure_context && levels.indexOf(r.exposure_context.level) !== -1)
+        ? r.exposure_context.level
+        : 'low',
+    symptoms: { ...a.symptoms },
+    comorbidities: { ...a.comorbidities },
+    age: a.age,
+    sex: a.sex,
+    day_ill: a.dayIll,
+  };
+  METRICS.forEach((m) => {
+    const s = r[m];
+    if (s && typeof s === 'object' && levels.indexOf(s.level) !== -1) {
+      ctx[m] = { score: Number(s.score) || 0, level: s.level };
+    }
+  });
+  return ctx;
+}
+
+/** 回传最近若干轮；末尾那条正是本次提问，交给 question 字段，不重复放进 history。 */
+function chatHistory() {
+  const clean = state.chat.messages.filter((m) => !m.error && m.content);
+  return clean
+    .slice(0, -1)
+    .slice(-CHAT_HISTORY_MAX)
+    .map((m) => ({ role: m.role, content: m.content }));
+}
+
+function chatBubble(msg) {
+  const t = T().chat;
+  const el = document.createElement('div');
+  const who = document.createElement('span');
+  who.className = 'sr-only';
+
+  if (msg.role === 'user') {
+    el.className = 'chat-msg is-user';
+    who.textContent = `${t.you}: `;
+    el.append(who, document.createTextNode(msg.content));
+    return el;
+  }
+
+  el.className = 'chat-msg is-assistant';
+  who.textContent = `${t.assistant}: `;
+
+  if (msg.error) {
+    el.classList.add('is-error');
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.className = 'chat-retry';
+    retry.textContent = t.retry;
+    retry.disabled = state.chat.sending;
+    retry.addEventListener('click', () => retryChat(msg));
+    el.append(who, document.createTextNode(t.error), document.createElement('br'), retry);
+    return el;
+  }
+
+  el.append(who, document.createTextNode(msg.content));
+  return el;
+}
+
+function typingBubble() {
+  const el = document.createElement('div');
+  el.className = 'chat-msg is-assistant chat-typing';
+  const sr = document.createElement('span');
+  sr.className = 'sr-only';
+  sr.textContent = T().chat.typing;
+  el.appendChild(sr);
+  for (let i = 0; i < 3; i += 1) {
+    const dot = document.createElement('span');
+    dot.className = 'dot';
+    dot.setAttribute('aria-hidden', 'true');
+    el.appendChild(dot);
+  }
+  return el;
+}
+
+function renderChatLog() {
+  const t = T().chat;
+  const log = $('chat-log');
+  const empty = $('chat-empty');
+  empty.textContent = t.empty;
+  empty.hidden = state.chat.messages.length > 0 || state.chat.sending;
+
+  const nodes = [empty];
+  state.chat.messages.forEach((m) => nodes.push(chatBubble(m)));
+  if (state.chat.sending) nodes.push(typingBubble());
+  log.replaceChildren(...nodes);
+  log.scrollTop = log.scrollHeight;
+}
+
+function renderChatChips() {
+  const t = T().chat;
+  const host = $('chat-chips');
+  host.replaceChildren(...t.chips.map((text) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'chat-chip';
+    btn.textContent = text;
+    btn.disabled = state.chat.sending;
+    btn.addEventListener('click', () => askChat(text));
+    return btn;
+  }));
+}
+
+function updateChatCounter() {
+  const input = $('chat-input');
+  const n = input.value.length;
+  const counter = $('chat-counter');
+  counter.textContent = `${n} / ${CHAT_QUESTION_MAX}`;
+  counter.classList.toggle('is-warn', n >= CHAT_QUESTION_MAX - 50);
+  $('chat-send').disabled = state.chat.sending || !input.value.trim();
+}
+
+function autoGrowChatInput() {
+  const el = $('chat-input');
+  el.style.height = 'auto';
+  // 视图隐藏时 scrollHeight 为 0，此时清空内联高度，交回 CSS 的 min-height
+  const h = el.scrollHeight;
+  el.style.height = h > 0 ? `${Math.min(h, 132)}px` : '';
+}
+
+function setChatBusy(busy) {
+  state.chat.sending = busy;
+  $('chat-input').disabled = busy;
+  document.querySelectorAll('.chat-chip').forEach((b) => { b.disabled = busy; });
+  updateChatCounter();
+}
+
+function askChat(text) {
+  const q = String(text || '').trim().slice(0, CHAT_QUESTION_MAX);
+  if (!q || state.chat.sending) return;
+  state.chat.messages.push({ role: 'user', content: q });
+  runChatTurn(q);
+}
+
+function submitChatForm() {
+  const input = $('chat-input');
+  const text = input.value;
+  if (!text.trim() || state.chat.sending) return;
+  input.value = '';
+  autoGrowChatInput();
+  updateChatCounter();
+  askChat(text);
+}
+
+function retryChat(errorMsg) {
+  if (state.chat.sending || !errorMsg.question) return;
+  const idx = state.chat.messages.indexOf(errorMsg);
+  if (idx !== -1) state.chat.messages.splice(idx, 1);
+  runChatTurn(errorMsg.question);
+}
+
+async function runChatTurn(question) {
+  setChatBusy(true);
+  renderChatLog();
+
+  const body = {
+    language: state.lang,
+    question,
+    context: chatContext(),
+    history: chatHistory(),
+  };
+
+  try {
+    const resp = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) throw new Error(`status ${resp.status}`);
+    const data = await resp.json();
+    const reply = data && typeof data.reply === 'string' ? data.reply.trim() : '';
+    if (!reply) throw new Error('empty reply');
+    state.chat.messages.push({ role: 'assistant', content: reply });
+  } catch (_) {
+    // 对话失败只在气泡里提示，不弹全局错误浮层
+    state.chat.messages.push({ role: 'assistant', error: true, question });
+  } finally {
+    setChatBusy(false);
+    renderChatLog();
+  }
+}
+
 /* --------------------------------------------------------- 初始化 */
 
 function resetWizard() {
   state.answers = freshAnswers();
+  state.chat = freshChat();
+  METRICS.forEach((m) => { state.openExplain[m] = false; });
+  $('chat-input').value = '';
+  autoGrowChatInput();
+  updateChatCounter();
+  renderChatLog();
   lastResult = null;
   goStep(0, null);
 }
 
 function init() {
   setLanguage(detectLang());
+  updateChatCounter();
 
   $('btn-start').addEventListener('click', () => {
     resetWizard();
@@ -1260,6 +2082,43 @@ function init() {
     showView('wizard');
   });
 
+  // 隐私说明浮层
+  $('btn-privacy').addEventListener('click', openPrivacy);
+  $('btn-privacy-chat').addEventListener('click', openPrivacy);
+  $('btn-privacy-close').addEventListener('click', closePrivacy);
+  $('privacy-overlay').querySelector('.overlay-backdrop')
+    .addEventListener('click', closePrivacy);
+  // 单控件对话框：Tab 不外逃，始终停在关闭按钮上
+  $('privacy-overlay').addEventListener('keydown', (e) => {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      $('btn-privacy-close').focus();
+    }
+  });
+
+  // 「为什么是这个分数」——两个仪表盘 + 加重风险横条
+  METRICS.forEach((metric) => {
+    $(EXPLAIN_TARGETS[metric].trigger)
+      .addEventListener('click', () => toggleExplain(metric));
+  });
+
+  // 追问对话
+  const chatInput = $('chat-input');
+  chatInput.addEventListener('input', () => {
+    updateChatCounter();
+    autoGrowChatInput();
+  });
+  // Enter 送出、Shift+Enter 换行；输入法组字中的 Enter 不算送出
+  chatInput.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
+    e.preventDefault();
+    submitChatForm();
+  });
+  $('chat-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    submitChatForm();
+  });
+
   // 语言切换器
   const toggle = $('lang-toggle');
   const menu = $('lang-menu');
@@ -1287,6 +2146,8 @@ function init() {
     if (!menu.hidden) {
       menu.hidden = true;
       toggle.setAttribute('aria-expanded', 'false');
+    } else if (!$('privacy-overlay').hidden) {
+      closePrivacy();
     } else if (!$('error-overlay').hidden) {
       hideErrorOverlay();
     }

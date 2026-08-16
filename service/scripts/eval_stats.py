@@ -1,4 +1,5 @@
-"""评测数据统计：读取评估回流 JSONL，输出三个模型各自的评分分布与等级占比。
+"""评测数据统计：读取评估回流 JSONL，输出三个模型各自的评分分布与等级占比，
+以及流行病学暴露等级的分布（规则判断，与模型评分相互独立）。
 
 用法（Windows）：
     .venv\\Scripts\\python.exe scripts\\eval_stats.py                # 默认 data/assessments.jsonl
@@ -106,9 +107,17 @@ def compute_stats(records: list[dict]) -> dict:
         if stats is not None:
             models[field] = stats
 
+    # 流行病学暴露等级分布（规则判断，非模型输出）。
+    # 只统计带该字段的记录：加入暴露问题之前的旧记录没有它，
+    # 把它们计成 unknown 会凭空造出一个不存在的档位。
+    exposure_levels = Counter(
+        str(r["exposure_level"]) for r in records if "exposure_level" in r
+    )
+
     return {
         "total": len(records),
         "models": models,
+        "exposure_levels": dict(sorted(exposure_levels.items())),
         "languages": dict(
             sorted(Counter(str(r.get("language", "unknown")) for r in records).items())
         ),
@@ -146,6 +155,18 @@ def print_report(stats: dict, skipped: int, path: Path) -> None:
             for lv, info in m["levels"].items()
         )
         print(f"  等级占比：{levels}")
+
+    exposure = stats.get("exposure_levels") or {}
+    if exposure:
+        n = sum(exposure.values())
+        print()
+        print(f"流行病学暴露等级分布（规则判断，非模型输出；n={n}）：")
+        for level in ("low", "medium", "high"):
+            count = exposure.get(level, 0)
+            print(f"  {level:>6}  {count:>5}  ({round(count * 100.0 / n, 1)}%)")
+        for level, count in exposure.items():  # 兜底：出现意料之外的取值也要显示
+            if level not in ("low", "medium", "high"):
+                print(f"  {level:>6}  {count:>5}")
 
     print()
     print("语言分布：")

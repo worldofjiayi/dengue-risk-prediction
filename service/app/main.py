@@ -8,8 +8,15 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
 from app.deepseek_client import DeepSeekError
-from app.pipeline import run_assessment
-from app.schemas import AssessmentResult, FormInput
+from app.pipeline import run_assessment, run_chat
+from app.schemas import (
+    SERVER_ERRORS,
+    UPSTREAM_ERRORS,
+    AssessmentResult,
+    ChatRequest,
+    ChatResponse,
+    FormInput,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -38,14 +45,39 @@ async def assess(form: FormInput) -> AssessmentResult:
     except DeepSeekError as exc:
         logger.error("上游 DeepSeek 服务错误：%s", exc)
         raise HTTPException(
-            status_code=502, detail="上游模型服务暂时不可用，请稍后重试。"
+            status_code=502,
+            detail=UPSTREAM_ERRORS.get(form.language, UPSTREAM_ERRORS["zh-CN"]),
         ) from exc
     except HTTPException:
         raise
     except Exception as exc:
         logger.exception("评估流程发生未知错误")
         raise HTTPException(
-            status_code=500, detail="服务器内部错误，请稍后重试。"
+            status_code=500,
+            detail=SERVER_ERRORS.get(form.language, SERVER_ERRORS["zh-CN"]),
+        ) from exc
+
+
+@app.post("/api/chat", response_model=ChatResponse)
+async def chat(req: ChatRequest) -> ChatResponse:
+    """就用户自己的评估结果做追问。无状态：上下文与历史由前端回传。
+
+    错误提示按请求语言本地化——聊天窗口里冒出一句中文报错，对西语用户
+    比没有回复更让人困惑。
+    """
+    try:
+        return await run_chat(req)
+    except DeepSeekError as exc:
+        logger.error("追问对话上游错误：%s", exc)
+        raise HTTPException(
+            status_code=502, detail=UPSTREAM_ERRORS.get(req.language, UPSTREAM_ERRORS["zh-CN"])
+        ) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("追问对话发生未知错误")
+        raise HTTPException(
+            status_code=500, detail=SERVER_ERRORS.get(req.language, SERVER_ERRORS["zh-CN"])
         ) from exc
 
 
