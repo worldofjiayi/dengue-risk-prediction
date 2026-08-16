@@ -99,10 +99,11 @@ questionnaire therefore offers a genuine "don't know" option and encodes it the 
 model was trained. This matters: leukopenia and the tourniquet test are the two strongest
 severity predictors, and no member of the public knows their own values.
 
-**WHO warning signs bypass the model entirely.** Models B and B2 are dominated by leukopenia
-(coefficients 1.4 and 1.6). A patient with persistent vomiting and petechiae who has not had
-blood drawn can score "low" on all three models — a false reassurance in exactly the situation
-where WHO says to seek care. The service therefore applies an independent rule: if such signs are
+**WHO warning signs bypass the model entirely.** Both severity models lean heavily on leukopenia
+— it is the single strongest predictor in Model B (β = 1.600) and second only to haematological
+disease in Model B2 (β = 1.400 vs. 1.529). A patient with persistent vomiting and petechiae who
+has not had blood drawn can therefore score "low" on all three models — a false reassurance in
+exactly the situation where WHO says to seek care. The service therefore applies an independent rule: if such signs are
 reported, a prominent alert is shown and the advice generator is instructed to recommend prompt
 medical assessment regardless of score.
 

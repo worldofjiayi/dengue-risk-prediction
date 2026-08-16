@@ -1,0 +1,774 @@
+<title>SINAN Dengue Triage</title>
+
+<style>
+  :root {
+    --bg:            #faf9f6;
+    --panel:         #ffffff;
+    --ink:           #16150f;
+    --ink-soft:      #3c3a33;
+    --grey:          #6d6a61;
+    --grey-faint:    #8c8981;
+    --rule:          #e2ded4;
+    --rule-strong:   #c9c4b6;
+    --accent:        #b0451c;
+    --accent-soft:   #fdf1e8;
+    --accent-rule:   #d9713f;
+    --thead-bg:      #1c1a15;
+    --thead-ink:     #f6f3ec;
+    --code-bg:       #f1eee6;
+    --tint:          #f6f3ea;
+    --tint-rule:     #cfc8b6;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:          #131210;
+      --panel:       #191815;
+      --ink:         #eeebe3;
+      --ink-soft:    #d3cfc4;
+      --grey:        #9e9a8f;
+      --grey-faint:  #858177;
+      --rule:        #322f29;
+      --rule-strong: #45413a;
+      --accent:      #e58b5c;
+      --accent-soft: #241a13;
+      --accent-rule: #a55730;
+      --thead-bg:    #2c2924;
+      --thead-ink:   #f3f0e8;
+      --code-bg:     #23211d;
+      --tint:        #1d1c18;
+      --tint-rule:   #403c34;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg:          #131210;
+    --panel:       #191815;
+    --ink:         #eeebe3;
+    --ink-soft:    #d3cfc4;
+    --grey:        #9e9a8f;
+    --grey-faint:  #858177;
+    --rule:        #322f29;
+    --rule-strong: #45413a;
+    --accent:      #e58b5c;
+    --accent-soft: #241a13;
+    --accent-rule: #a55730;
+    --thead-bg:    #2c2924;
+    --thead-ink:   #f3f0e8;
+    --code-bg:     #23211d;
+    --tint:        #1d1c18;
+    --tint-rule:   #403c34;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+    margin: 0;
+    padding: 0;
+  }
+
+  .sheet {
+    max-width: 820px;
+    margin: 0 auto;
+    padding: 68px 30px 96px;
+  }
+
+  /* ---------- masthead ---------- */
+
+  .kicker {
+    font-size: 11.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    font-weight: 650;
+    color: var(--accent);
+    margin: 0 0 22px;
+  }
+
+  h1 {
+    font-size: 40px;
+    line-height: 1.14;
+    letter-spacing: -0.022em;
+    font-weight: 700;
+    margin: 0 0 16px;
+    max-width: 15.5em;
+  }
+
+  h1 .l2 { display: block; color: var(--ink-soft); font-weight: 640; }
+
+  .subtitle {
+    font-size: 17px;
+    color: var(--grey);
+    margin: 0 0 30px;
+    max-width: 44em;
+  }
+
+  .meta {
+    border-top: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+    padding: 14px 0;
+    margin: 0 0 40px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 34px;
+    font-size: 13px;
+    color: var(--grey);
+  }
+  .meta b {
+    display: block;
+    font-size: 10.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--grey-faint);
+    font-weight: 650;
+    margin-bottom: 1px;
+  }
+  .meta span { color: var(--ink-soft); }
+
+  /* ---------- sections ---------- */
+
+  .part {
+    font-size: 11.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    font-weight: 700;
+    color: var(--accent);
+    margin: 62px 0 4px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--accent-rule);
+  }
+  .part-sub {
+    font-size: 13px;
+    color: var(--grey);
+    margin: 10px 0 0;
+  }
+
+  h2 {
+    font-size: 20.5px;
+    letter-spacing: -0.012em;
+    font-weight: 680;
+    margin: 46px 0 0;
+    padding-bottom: 9px;
+    border-bottom: 1px solid var(--rule-strong);
+    display: flex;
+    align-items: baseline;
+    gap: 13px;
+  }
+  h2 .num {
+    flex: none;
+    font-size: 12px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--accent);
+    border: 1px solid var(--accent-rule);
+    border-radius: 3px;
+    min-width: 22px;
+    padding: 2px 0 3px;
+    text-align: center;
+    line-height: 1;
+    position: relative;
+    top: -2px;
+  }
+
+  h3 {
+    font-size: 14.5px;
+    font-weight: 680;
+    margin: 30px 0 -4px;
+    color: var(--ink);
+  }
+
+  p { margin: 15px 0; }
+  p.lead { font-size: 17px; color: var(--ink-soft); }
+
+  a { color: var(--accent); text-decoration: none; border-bottom: 1px solid var(--accent-rule); }
+
+  code, .mono {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 0.875em;
+  }
+  code {
+    background: var(--code-bg);
+    padding: 1px 4.5px;
+    border-radius: 3px;
+  }
+
+  /* ---------- lists ---------- */
+
+  ul { margin: 15px 0; padding-left: 0; list-style: none; }
+  ul li {
+    position: relative;
+    padding-left: 17px;
+    margin: 8px 0;
+  }
+  ul li::before {
+    content: "";
+    position: absolute;
+    left: 2px;
+    top: 0.68em;
+    width: 4px; height: 4px;
+    border-radius: 50%;
+    background: var(--accent-rule);
+  }
+  ul li b, ul li strong { font-weight: 660; color: var(--ink); }
+
+  ol.steps { margin: 15px 0; padding-left: 20px; }
+  ol.steps li { margin: 8px 0; }
+
+  /* ---------- tables ---------- */
+
+  .tw { overflow-x: auto; margin: 22px 0; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  caption {
+    caption-side: top;
+    text-align: left;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    font-weight: 650;
+    color: var(--grey-faint);
+    padding-bottom: 8px;
+  }
+  thead th {
+    background: var(--thead-bg);
+    color: var(--thead-ink);
+    font-weight: 620;
+    text-align: left;
+    padding: 8px 11px;
+    border: 1px solid var(--thead-bg);
+    white-space: nowrap;
+    font-size: 12px;
+  }
+  tbody td, tbody th {
+    border: 1px solid var(--rule);
+    padding: 7px 11px;
+    vertical-align: top;
+    text-align: left;
+    font-weight: 400;
+  }
+  tbody th { font-weight: 620; }
+  td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  tbody tr.total td, tbody tr.total th {
+    font-weight: 680;
+    border-top: 1.5px solid var(--rule-strong);
+    background: var(--tint);
+  }
+  .em { font-weight: 700; }
+  .neg { color: var(--grey); }
+
+  /* ---------- boxes ---------- */
+
+  .box {
+    background: var(--accent-soft);
+    border-left: 3px solid var(--accent-rule);
+    padding: 20px 24px;
+    margin: 28px 0;
+  }
+  .box.plain {
+    background: var(--tint);
+    border-left-color: var(--tint-rule);
+  }
+  .box .box-label {
+    font-size: 10.5px;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    font-weight: 700;
+    color: var(--accent);
+    margin: 0 0 10px;
+  }
+  .box.plain .box-label { color: var(--grey); }
+  .box p { margin: 10px 0; font-size: 15px; }
+  .box p:first-of-type { margin-top: 0; }
+  .box p:last-child { margin-bottom: 0; }
+  .box ul { margin: 10px 0 0; }
+  .box li { font-size: 15px; }
+  .box table { margin-top: 14px; }
+
+  .formula {
+    background: var(--code-bg);
+    border: 1px solid var(--rule);
+    padding: 14px 16px;
+    margin: 20px 0;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 12.5px;
+    line-height: 1.75;
+    white-space: pre;
+    overflow-x: auto;
+    color: var(--ink-soft);
+  }
+
+  .flow {
+    border: 1px solid var(--rule);
+    background: var(--panel);
+    padding: 16px 18px;
+    margin: 20px 0;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 12px;
+    line-height: 1.85;
+    white-space: pre;
+    overflow-x: auto;
+    color: var(--ink-soft);
+  }
+
+  .note {
+    font-size: 13.5px;
+    color: var(--grey);
+    border-left: 2px solid var(--rule-strong);
+    padding-left: 14px;
+    margin: 20px 0;
+  }
+
+  .disclaimer {
+    margin: 44px 0 0;
+    padding: 16px 18px;
+    border: 1px solid var(--accent-rule);
+    font-size: 14px;
+    color: var(--ink-soft);
+  }
+  .disclaimer b { color: var(--accent); }
+
+  hr.end {
+    border: 0;
+    border-top: 1px solid var(--rule);
+    margin: 56px 0 0;
+  }
+
+  footer {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    padding-top: 14px;
+    font-size: 11.5px;
+    letter-spacing: 0.06em;
+    color: var(--grey-faint);
+    text-transform: uppercase;
+  }
+
+  ol.refs { font-size: 13.5px; color: var(--ink-soft); padding-left: 20px; margin: 18px 0 0; }
+  ol.refs li { margin: 7px 0; }
+  ol.refs i { color: var(--grey); }
+
+  @media (max-width: 620px) {
+    .sheet { padding: 46px 18px 64px; }
+    h1 { font-size: 30px; }
+    .subtitle { font-size: 16px; }
+    h2 { font-size: 18.5px; }
+  }
+
+  @media print {
+    :root {
+      --bg: #ffffff; --panel: #ffffff; --ink: #000000; --ink-soft: #1a1a1a;
+      --grey: #4a4a4a; --grey-faint: #5c5c5c; --rule: #cccccc; --rule-strong: #999999;
+      --accent: #8f3512; --accent-soft: #f7efe9; --accent-rule: #8f3512;
+      --thead-bg: #1c1a15; --thead-ink: #ffffff; --code-bg: #f2f2f2;
+      --tint: #f4f4f2; --tint-rule: #bbbbbb;
+    }
+    body { background: #ffffff; color: #000000; font-size: 10.5pt; line-height: 1.5; }
+    .sheet { max-width: none; padding: 0; }
+    a { color: #000; border-bottom: none; }
+    h1 { font-size: 24pt; }
+    h2 { font-size: 13pt; page-break-after: avoid; break-after: avoid; }
+    h3 { page-break-after: avoid; break-after: avoid; }
+    .part { page-break-after: avoid; break-after: avoid; page-break-before: always; break-before: page; }
+    .part:first-of-type { page-break-before: auto; break-before: auto; }
+    table, .tw, .box, .formula, .flow, .disclaimer, figure {
+      page-break-inside: avoid; break-inside: avoid;
+    }
+    thead { display: table-header-group; }
+    tr, li, p { page-break-inside: avoid; break-inside: avoid; }
+    footer { page-break-inside: avoid; }
+  }
+</style>
+
+<div class="sheet">
+
+  <p class="kicker">Technical Report &middot; Dengue Risk Modelling</p>
+
+  <h1>Nine Million Surveillance Records,<span class="l2">One Deployed Triage Aid</span></h1>
+
+  <p class="subtitle">An interpretable dengue risk model built on Brazilian SINAN notification data (2023&ndash;2025), externally validated against a published <i>Lancet Global Health</i> model, and shipped as a multilingual public self-assessment service.</p>
+
+  <div class="meta">
+    <div><b>Data source</b><span>SINAN / DATASUS &mdash; DENGBR23, DENGBR24, DENGBR25</span></div>
+    <div><b>Records</b><span>9,449,900 cleaned</span></div>
+    <div><b>Method</b><span>Logistic regression, 26 features, 3 targets</span></div>
+    <div><b>Service</b><span>FastAPI &middot; 5 languages &middot; http://35.88.114.45</span></div>
+  </div>
+
+  <p class="lead">This report covers a two-part project. The first half is research: turning Brazil's national notifiable-disease surveillance archive into three interpretable risk models and testing them honestly against an externally published instrument. The second half is engineering: putting the resulting coefficients in front of the public as a working web service, including the parts that turned out to be harder than the modelling.</p>
+
+  <div class="box">
+    <p class="box-label">The distinction that governs everything below</p>
+    <p>The models produce a <b>relative risk index, never a probability</b>. The training pipeline exported the fitted coefficient vector but not the intercept, and it trained on downsampled data with <code>class_weight="balanced"</code>. Both facts independently destroy any claim to calibrated absolute risk: without an intercept there is no baseline to anchor to, and with resampling the implied prevalence is an artefact of the sampling design rather than of any real population.</p>
+    <p>What survives is <b>ordering</b>. A logistic model with no intercept still ranks people correctly, and ranking is what AUC measures. Everything the service reports &mdash; the 0&ndash;100 figures, the low/medium/high bands &mdash; is a statement about position relative to a reference person, not about the chance of any outcome.</p>
+    <p>Reading the numbers any other way is the single most likely misuse of this work, so the constraint is enforced in the code, in the user-facing strings, and in a test that fails if the model note ever claims a percentage.</p>
+  </div>
+
+  <p class="part">Part I &mdash; The research</p>
+  <p class="part-sub">Feature engineering, three complementary models, and an external validation that partly failed.</p>
+
+  <h2><span class="num">1</span> Problem and data</h2>
+
+  <p>SINAN (<i>Sistema de Informa&ccedil;&atilde;o de Agravos de Notifica&ccedil;&atilde;o</i>) is Brazil's national notifiable-disease surveillance system. Each row of the annual dengue export is one suspected or confirmed case, carrying symptoms, comorbidities, demographics, dates, and a final classification assigned after investigation. The raw files have roughly 121 columns; the pipeline reads only the ~27 it needs, which matters when a single year runs to 6.5 million rows.</p>
+
+  <div class="tw">
+    <table>
+      <caption>Table 1 &mdash; Data volumes by year</caption>
+      <thead>
+        <tr><th>Year</th><th class="n">Raw notifications</th><th class="n">After cleaning</th><th class="n">Severe (code 12)</th></tr>
+      </thead>
+      <tbody>
+        <tr><th>2023</th><td class="n">1,646,000</td><td class="n">1,577,000</td><td class="n">1,549</td></tr>
+        <tr><th>2024</th><td class="n">6,565,000</td><td class="n">6,288,000</td><td class="n">8,226</td></tr>
+        <tr><th>2025</th><td class="n">1,645,000</td><td class="n">1,585,000</td><td class="n">2,535</td></tr>
+        <tr class="total"><th>Total</th><td class="n">9,856,000</td><td class="n">9,449,900</td><td class="n">12,310</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>The 2024 figure is not a data error. Brazil experienced its most severe recorded dengue epidemic that year, and the four-fold jump in notifications is the epidemic itself appearing in the surveillance record. It has analytic consequences that show up again in section 4: at epidemic peak the notification system is overloaded, investigation lags, and the "inconclusive" bucket fills with cases that were probably dengue.</p>
+
+  <p><b>Outcome coding.</b> The pipeline keeps only records with a resolved <code>CLASSI_FIN</code>:</p>
+
+  <ul>
+    <li><b>8</b> &mdash; inconclusive or discarded</li>
+    <li><b>10</b> &mdash; ordinary dengue</li>
+    <li><b>11</b> &mdash; dengue with warning signs</li>
+    <li><b>12</b> &mdash; severe dengue</li>
+  </ul>
+
+  <p>Severity is ordered 10 &lt; 11 &lt; 12, which is what makes the three-model design in section 3 possible. Cleaning applies three quality filters: age must decode to 0&ndash;110 years, days of illness must fall in 0&ndash;14 (negative or implausibly long values are data-entry errors), and sex and age must be present.</p>
+
+  <h2><span class="num">2</span> Feature engineering</h2>
+
+  <p>Twenty-six features, all derived deterministically from the notification form. The exact ordering is fixed by <code>FEATS</code> in the training script and is reproduced verbatim in the deployed service, because a permuted feature vector silently produces meaningless scores rather than an error.</p>
+
+  <div class="tw">
+    <table>
+      <caption>Table 2 &mdash; The 26-feature contract</caption>
+      <thead>
+        <tr><th>Group</th><th class="n">Count</th><th>Fields</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th>Symptoms (binary)</th><td class="n">14</td>
+          <td><span class="mono">FEBRE, MIALGIA, CEFALEIA, EXANTEMA, VOMITO, NAUSEA, DOR_COSTAS, CONJUNTVIT, ARTRITE, ARTRALGIA, PETEQUIA_N, LEUCOPENIA, LACO, DOR_RETRO</span><br>fever, myalgia, headache, rash, vomiting, nausea, back pain, conjunctivitis, arthritis, arthralgia, petechiae, leukopenia, positive tourniquet test, retro-orbital pain</td>
+        </tr>
+        <tr>
+          <th>Comorbidities (binary)</th><td class="n">7</td>
+          <td><span class="mono">DIABETES, HEMATOLOG, HEPATOPAT, RENAL, HIPERTENSA, ACIDO_PEPT, AUTO_IMUNE</span><br>diabetes, haematological disease, liver disease, renal disease, hypertension, peptic ulcer disease, autoimmune disease</td>
+        </tr>
+        <tr>
+          <th>Demographics</th><td class="n">2</td>
+          <td><span class="mono">age</span> (years, decoded), <span class="mono">sex_f</span> (female = 1)</td>
+        </tr>
+        <tr>
+          <th>Clinical timing</th><td class="n">1</td>
+          <td><span class="mono">day_ill</span> = notification date &minus; symptom onset date, 0&ndash;14</td>
+        </tr>
+        <tr>
+          <th>Seasonality</th><td class="n">2</td>
+          <td><span class="mono">wk_sin</span> = sin(2&pi;w/52), <span class="mono">wk_cos</span> = cos(2&pi;w/52), from the epidemiological week</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>SINAN tri-state coding, and why only "1" maps to 1</h3>
+
+  <p>SINAN records every symptom and comorbidity as <code>1 = yes</code>, <code>2 = no</code>, <code>9 = unknown</code>. The feature engineering step is a single expression &mdash; <code>(df[c] == "1")</code> &mdash; which means <b>"no" and "unknown" are indistinguishable to the model</b>. This is a real modelling decision, not an oversight: the alternative, treating unknown as missing and imputing, would fabricate information for fields that are unrecorded precisely because nobody checked. The consequence is that the model has learned to interpret a zero as "not documented as present", and the deployed service must reproduce the same convention or inference will not match training. Section 9 returns to this.</p>
+
+  <h3>Age decoding</h3>
+
+  <p><code>NU_IDADE_N</code> is an encoded field, not a number of years. Values in the 4000s carry years in the last three digits (4031 = 31 years); values below 4000 encode hours, days, or months, i.e. infants under one year, and are recorded as age 0.</p>
+
+  <h3>A parsing trap worth flagging</h3>
+
+  <p>SINAN dates are ISO <code>%Y-%m-%d</code>, not <code>%d/%m/%Y</code>. Because <code>pd.to_datetime(..., errors="coerce")</code> converts unparseable values to <code>NaT</code> rather than raising, the wrong format fails <i>every</i> date silently; <code>day_ill</code> becomes entirely null, the 0&ndash;14 range filter then drops every row, and the pipeline reports a clean run on an empty sample. This cost real debugging time and is worth stating explicitly, because the failure mode is a plausible-looking zero rather than an exception.</p>
+
+  <h3>Seasonal harmonic encoding</h3>
+
+  <p>Dengue transmission is strongly seasonal, so epidemiological week is informative &mdash; but week number is a bad feature. Weeks 52 and 1 are one week apart in reality and 51 units apart numerically, so a linear term would treat the turn of the year as the largest possible jump. Projecting the week onto a pair of coordinates, <code>sin(2&pi;w/52)</code> and <code>cos(2&pi;w/52)</code>, places week 52 adjacent to week 1 in feature space and lets a linear model express a smooth annual cycle with two parameters.</p>
+
+  <h2><span class="num">3</span> Three models, and why three</h2>
+
+  <p>A single "dengue risk" model would conflate two clinically distinct questions: <i>is this dengue at all?</i> and <i>is this case going to get dangerous?</i> The ordered outcome coding allows both to be asked separately, and the second to be asked twice at different severity thresholds.</p>
+
+  <ul>
+    <li><b>Model A &mdash; is it dengue?</b> Positive = confirmed (10/11/12), negative = inconclusive (8). Note immediately that the negative class is <i>not</i> a non-dengue control group; see section 5.</li>
+    <li><b>Model B &mdash; will it worsen?</b> Restricted to confirmed cases. Positive = warning signs or severe (11/12), negative = ordinary (10).</li>
+    <li><b>Model B2 &mdash; will it become severe?</b> Restricted to confirmed cases. Positive = severe (12), negative = other dengue (10/11).</li>
+  </ul>
+
+  <h3>Class imbalance: downsampling plus balanced weights</h3>
+
+  <p>Severe dengue is roughly <b>0.15% of confirmed cases</b>. Trained directly, a model that always answers "not severe" achieves about 99.8% accuracy while identifying nobody &mdash; the few thousand severe cases contribute so little to the loss that there is no gradient pressure to learn them. The pipeline applies two complementary corrections:</p>
+
+  <ul>
+    <li><b>Downsampling.</b> Every minority-class record is kept; the majority class is randomly subsampled (Model A caps each class at 150,000; models B and B2 cap the negative class at 200,000). This narrows the ratio from hundreds-to-one to a workable range and shortens training considerably.</li>
+    <li><b>Balanced class weights.</b> <code>class_weight="balanced"</code> then reweights inside the loss &mdash; each class receives <span class="mono">n_samples / (n_classes &times; n_class)</span> &mdash; compensating for whatever imbalance survives resampling.</li>
+  </ul>
+
+  <p>Fitting is a 70/30 stratified split, <code>LogisticRegression(max_iter=600, class_weight="balanced")</code>, threshold 0.5 for the reported sensitivity and specificity. Logistic regression rather than a black box was deliberate: every coefficient reads directly as a log-odds contribution, which is what makes sections 4 and 8 possible at all.</p>
+
+  <div class="tw">
+    <table>
+      <caption>Table 3 &mdash; Model performance on balanced test sets</caption>
+      <thead>
+        <tr><th>Model</th><th>Target</th><th class="n">n</th><th class="n">Positives</th><th class="n">AUC</th><th class="n">Sens.</th><th class="n">Spec.</th></tr>
+      </thead>
+      <tbody>
+        <tr><th>A</th><td>Dengue (10/11/12) vs. inconclusive (8)</td><td class="n">300,000</td><td class="n">150,000</td><td class="n">0.686</td><td class="n">0.718</td><td class="n">0.547</td></tr>
+        <tr><th>B</th><td>Warning + severe (11/12) vs. ordinary (10)</td><td class="n">364,246</td><td class="n">164,246</td><td class="n">0.722</td><td class="n">0.605</td><td class="n">0.725</td></tr>
+        <tr><th>B2</th><td>Severe (12) vs. other dengue (10/11)</td><td class="n">212,310</td><td class="n">12,310</td><td class="n em">0.810</td><td class="n">0.699</td><td class="n">0.780</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p class="note">These metrics are computed on balanced (downsampled) test sets and are therefore <b>optimistic</b>. Under true prevalence, positive predictive value will be substantially lower. Re-evaluation on a prevalence-preserving test set is required before any clinical use.</p>
+
+  <p><b>What the coefficients say.</b> The severity models converge on the same signal. In Model B2 the leading terms are haematological disease (1.529), leukopenia (1.400), renal disease (1.289), vomiting (1.026) and autoimmune disease (0.960); in Model B, leukopenia leads outright at 1.600, followed by vomiting (0.621) and a block of comorbidities. Model A instead loads on the classic acute presentation &mdash; fever (0.904), leukopenia (0.601), myalgia (0.431), headache (0.409). Several common symptoms carry <i>negative</i> coefficients in the severity models (headache &minus;0.725, back pain &minus;0.333, arthritis &minus;0.463 in B2): they mark ordinary dengue, and their presence is weak evidence <i>against</i> deterioration.</p>
+
+  <p>The contrast between A (0.686) and B2 (0.810) is the central research finding: <b>severity is considerably more learnable than case definition</b>, and the reason is the data rather than the algorithm.</p>
+
+  <h2><span class="num">4</span> External validation against IDAMS</h2>
+
+  <p>Internal metrics alone prove little. The models were therefore tested against the IDAMS clinical calculator published in <i>Lancet Global Health</i> (2023), whose appendix 7, Table S11 gives day-stratified odds ratios for distinguishing dengue from other febrile illnesses.</p>
+
+  <p>Two mismatches must be declared first, because they determine which checks are legitimate. <b>The targets differ</b>: IDAMS compares dengue against genuine other febrile illness, whereas SINAN's negative class is "inconclusive/discarded", which is not a clean control. <b>Variables are missing</b>: IDAMS relies on cough, runny nose, skin flushing and continuous temperature, none of which SINAN collects; only 4&ndash;5 of its 11 variables map across. What follows is therefore a directional qualitative check plus a discounted quantitative transfer, not a strict external validation.</p>
+
+  <div class="tw">
+    <table>
+      <caption>Table 4 &mdash; Three checks against IDAMS</caption>
+      <thead>
+        <tr><th>Check</th><th>Result</th></tr>
+      </thead>
+      <tbody>
+        <tr><th>&#9312; Coefficient direction agreement</th><td><b>Passed &mdash; 4/4.</b> Fever/temperature, rash, petechiae/skin bleeding and age all carry positive coefficients in Model A, matching IDAMS OR &gt; 1. The internal ordering agrees too: bleeding outweighs rash, echoing IDAMS where the bleeding OR climbs from 5.57 to 11.13 over days 3&ndash;5 while rash stays far lower.</td></tr>
+        <tr><th>&#9313; Day-of-illness gradient</th><td><b>Not replicated.</b> IDAMS discrimination rises sharply from day 2 to day 5 (AUC 0.75 &rarr; 0.86). Re-fitting Model A stratified by day of illness gives an essentially flat curve (0.65&ndash;0.67).</td></tr>
+        <tr><th>&#9314; Whole-calculator transfer</th><td><b>Degraded but usable.</b> AUC 0.617 applying the published coefficients directly &lt; 0.650 refitting the same four variables locally &lt; 0.668 using the full 26-feature local model.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Check &#9313; is an informative negative result</h3>
+
+  <p>The failure to replicate is not a bug to be tuned away; it is diagnostic, and there are three concrete reasons for it. First, SINAN's code 8 is not a clean non-dengue comparator &mdash; it plausibly contains many undiagnosed true dengue cases, so the signal cannot sharpen as illness progresses. Second, the variables carrying IDAMS's late-stage discrimination are absent: mucosal/skin bleeding and skin flushing spike in discriminative value on days 4&ndash;5, and SINAN records only petechiae. Third, SINAN captures symptoms <b>once, at notification</b>, whereas IDAMS followed patients daily; a static snapshot cannot express a temporal gradient it never observed.</p>
+
+  <p>Reporting this is more useful than suppressing it. It localises exactly what a diagnostic-grade dataset would need to add.</p>
+
+  <h3>Check &#9314; in detail</h3>
+
+  <p>The IDAMS calculator was applied person-by-person to every record with day of illness 2&ndash;5 across all three years &mdash; <b>5,060,427 people</b>. The linear predictor is the sum of log-odds contributions for region (Latin America), age, fever (approximating a 1&deg;C temperature rise), rash, and petechiae (approximating skin bleeding), using each day's own coefficient row.</p>
+
+  <div class="tw">
+    <table>
+      <caption>Table 5 &mdash; Transfer performance, days 2&ndash;5</caption>
+      <thead>
+        <tr><th>Stratum</th><th class="n">AUC</th><th>Reading</th></tr>
+      </thead>
+      <tbody>
+        <tr><th>Direct transfer, pooled</th><td class="n">0.617</td><td>Published coefficients, no refitting</td></tr>
+        <tr><th>Sensitivity analysis</th><td class="n">0.619</td><td>Tourniquet test merged into the bleeding term &mdash; result is stable</td></tr>
+        <tr><th>Local refit, same 4 variables</th><td class="n">0.650</td><td>The ~0.03 gap is the population/target mismatch cost</td></tr>
+        <tr><th>Local model, all 26 features</th><td class="n">0.668</td><td>The further ~0.02 is what the extra local variables buy</td></tr>
+        <tr><th>Day 2 / 3 / 4 / 5</th><td class="n">0.610 / 0.624 / 0.638 / 0.602</td><td>No upward gradient, consistent with check &#9313;</td></tr>
+        <tr><th>2023 / 2024 / 2025</th><td class="n">0.618 / 0.601 / 0.665</td><td>Worst in the epidemic year, as label noise predicts</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>All of these sit far below the published 0.75&ndash;0.86, which is the substantive conclusion: <b>a published clinical calculator cannot be moved between populations and targets without local recalibration</b>. The per-year pattern reinforces the diagnosis rather than confusing it &mdash; discrimination is worst in 2024, the epidemic year, exactly when an overloaded notification system pushes the most undiagnosed dengue into the "inconclusive" label.</p>
+
+  <h3>Why the calculator still has a use</h3>
+
+  <p>Applying IDAMS's own tier thresholds (0.4 and 1.6 on the linear predictor), the score distribution moves monotonically with final severity &mdash; even though the score was never designed to predict severity at all.</p>
+
+  <div class="tw">
+    <table>
+      <caption>Table 6 &mdash; IDAMS score by final classification (days 2&ndash;5, n = 5,060,427)</caption>
+      <thead>
+        <tr><th>Final classification</th><th class="n">n</th><th class="n">Mean score</th><th class="n">Median</th><th class="n">High-risk tier</th></tr>
+      </thead>
+      <tbody>
+        <tr><th>8 &mdash; inconclusive</th><td class="n">432,205</td><td class="n">0.585</td><td class="n">0.504</td><td class="n">5.9%</td></tr>
+        <tr><th>10 &mdash; ordinary dengue</th><td class="n">4,543,901</td><td class="n">0.825</td><td class="n">0.721</td><td class="n">9.2%</td></tr>
+        <tr><th>11 &mdash; warning signs</th><td class="n">78,135</td><td class="n">0.963</td><td class="n">0.830</td><td class="n">15.0%</td></tr>
+        <tr><th>12 &mdash; severe</th><td class="n">6,186</td><td class="n">1.178</td><td class="n">1.077</td><td class="n em">23.7%</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>A severe case is roughly <b>2.6&times;</b> more likely to be flagged high-risk than an ordinary one. Set against the tier split on the diagnostic question &mdash; confirmed cases fall 25.4% / 65.3% / 9.3% across low/medium/high, inconclusive cases 41.9% / 52.2% / 5.9%, so 74.6% of confirmed but also 58.1% of inconclusive land in the medium-or-above band &mdash; the separation is weak for diagnosis but real for severity ordering. That asymmetry is the argument for a <b>triage-aid framing rather than a diagnostic one</b>, and it is the framing the deployed service adopts.</p>
+
+  <h2><span class="num">5</span> Limitations, stated plainly</h2>
+
+  <ul>
+    <li><b>No true negatives &mdash; structural.</b> SINAN notifies suspected dengue only; non-dengue febrile illnesses never enter the system. Model A therefore learns "dengue vs. inconclusive", not "dengue vs. other fever". No algorithm recovers information the sampling frame never captured, and this is a ceiling rather than a tuning problem.</li>
+    <li><b>Optimistic metrics.</b> Balanced test sets inflate specificity and positive predictive value relative to deployment. At a true severe-case prevalence around 0.15%, the share of alerts that are genuine will be far lower than Table 3 suggests.</li>
+    <li><b>Missing laboratory depth.</b> Platelet count and haematocrit &mdash; among the strongest known predictors of dengue severity &mdash; are simply absent from the notification form. Leukopenia is the only laboratory-derived feature available.</li>
+    <li><b>Passive surveillance bias.</b> Symptoms are self-reported, recorded once at notification, and conditioned on the patient having sought care in the first place.</li>
+    <li><b>Uncalibrated thresholds.</b> No intercept was exported, so nothing here is an absolute risk. The low/medium/high cut-offs in the service are engineering defaults, not clinically derived boundaries.</li>
+    <li><b>Hemisphere transfer.</b> Seasonal terms were fitted on southern-hemisphere data. The service cancels them out of its relative score (section 7), so individual results are not biased &mdash; but seasonality is consequently not modelled for users at all.</li>
+  </ul>
+
+  <p class="part">Part II &mdash; The service</p>
+  <p class="part-sub">Turning a 2.9 KB coefficient file into a public tool, and the problems that only appear once you try.</p>
+
+  <h2><span class="num">6</span> Architecture</h2>
+
+  <div class="flow">Questionnaire (static/index.html)
+        │  POST /api/assess
+        ▼
+  FastAPI  app.main:app
+        │
+        ├─ optional ─▶ LLM call #1 — read free-text notes, promote unknown → yes
+        │
+        ▼
+  Deterministic encoding — 26 features
+        │
+        ▼
+  Three logistic models — A dengue / B worsening / B2 severe
+        │
+        ├──────────▶ Rule check — WHO warning signs (independent of score)
+        │
+        ▼
+  LLM call #2 — advice in the user's language
+        │
+        ▼
+  AssessmentResult ─▶ two gauges + warning banner + advice</div>
+
+  <p>The six-step questionnaire collects age, sex, days of illness, 14 symptoms and 7 comorbidities, each answered <i>yes / no / don't know</i>, plus an optional free-text note. Omitted keys default to <code>unknown</code>; unrecognised keys return HTTP 422.</p>
+
+  <p><b>Feature encoding is deterministic and authoritative.</b> The LLM has exactly one narrow job in the input path: read the free-text notes field and flag symptoms the user described in prose but did not tick. It may only promote <code>unknown &rarr; yes</code>; it can never override an explicit answer, and any failure is logged and ignored rather than propagated &mdash; the assessment proceeds on the deterministic encoding. The second LLM call generates the natural-language advice and is the only step whose failure aborts the request. Both calls speak the OpenAI-compatible <code>/chat/completions</code> format (DeepSeek in production), with up to two JSON-repair retries. A mock mode computes <b>real scores from the real model</b> and returns canned advice, so the service is fully testable without an API key.</p>
+
+  <p><b>Nothing but coefficients is deployed.</b> The entire model artefact is a <b>2,952-byte JSON file</b> holding the three coefficient dictionaries. No training data is vendored, downloaded, or touched at inference time, and coefficients are looked up by feature name rather than by position, so file ordering cannot silently corrupt a score.</p>
+
+  <h2><span class="num">7</span> The scoring problem</h2>
+
+  <p>This was the hardest engineering problem in the project, and it is not a modelling problem &mdash; it is the problem of reporting a number to a member of the public when no calibrated number exists.</p>
+
+  <p><b>The constraint.</b> <code>02_fit_models.py</code> serialises <code>m.coef_</code> and not <code>m.intercept_</code>. So the service can compute <span class="mono">z = &Sigma; coef &times; feature</span>, a linear predictor with no constant term. Even had the intercept been saved, it would encode the prevalence of the <i>downsampled, class-reweighted</i> training set, not of any real population. There is no calibrated probability to report, and no post-hoc arithmetic recovers one.</p>
+
+  <h3>Two approaches that failed</h3>
+
+  <ul>
+    <li><b>Sigmoid of z.</b> The obvious move. With no intercept, <span class="mono">z</span> is persistently positive for anyone reporting symptoms &mdash; the positive coefficients dominate &mdash; so <span class="mono">sigmoid(z)</span> saturates and almost every symptomatic respondent lands near 100. The output stops discriminating exactly where discrimination matters.</li>
+    <li><b>Normalising against the theoretical range.</b> Mapping <span class="mono">z</span> onto <span class="mono">[z_min, z_max]</span> looks principled until you ask what <span class="mono">z_min</span> is: it is the state of holding <i>every</i> negative-coefficient symptom simultaneously &mdash; arthritis and headache and back pain and peptic ulcer disease and nothing else &mdash; which no real person occupies. Because the true floor sits far below anything reachable, a genuinely asymptomatic person lands in the middle of the range. This was measured, not hypothesised: <b>a healthy 25-year-old scored "medium"</b>. Producing false alarm in the healthy is a worse failure than producing false reassurance in the sick is unlikely.</li>
+  </ul>
+
+  <h3>Reference-person anchoring</h3>
+
+  <p>The fix is to replace the unreachable theoretical floor with a floor that means something to a reader.</p>
+
+  <div class="formula">score = 100 × (z − z_ref) / (z_ceil − z_ref)        clipped to [0, 100]
+
+z_ref  = same epidemiological week, no symptoms, no comorbidities,
+         30-year-old male, day 0 of illness
+z_ceil = same epidemiological week, every risk-increasing feature
+         at its bound (age 110, day_ill 14, binaries at 1 where the
+         coefficient is positive)</div>
+
+  <p>The score now answers a question a user can actually interpret: <i>relative to a symptom-free person assessed right now, where do I sit on this model?</i> A person matching the reference scores 0 by construction; a person holding every risk-increasing feature scores 100. Both endpoints are verified by test.</p>
+
+  <p><b>The seasonal term cancels &mdash; deliberately.</b> <code>wk_sin</code> and <code>wk_cos</code> appear identically in <span class="mono">z</span>, <span class="mono">z_ref</span> and <span class="mono">z_ceil</span>, so they vanish from the ratio. This is the correct behaviour rather than a convenient accident: the harmonics encode a <i>population-level</i> seasonal baseline, and a user cannot act on the fact that it is March. Two people with identical symptoms should receive identical scores whether assessed in week 8 or week 40. The term still contributes to the raw <span class="mono">z</span>, which is returned in the API response and written to the evaluation log, so seasonal information is preserved for future recalibration &mdash; it is only excluded from the number shown to a person.</p>
+
+  <div class="box plain">
+    <p class="box-label">Worked example &mdash; observed spread</p>
+    <p>Four reference profiles run through the deployed service. These are the values a reviewer can reproduce from the bundled coefficients; the low/medium/high bands are the engineering defaults at 35 and 65.</p>
+    <div class="tw">
+      <table>
+        <thead>
+          <tr><th>Profile</th><th class="n">A &mdash; dengue</th><th class="n">B &mdash; worsening</th><th class="n">B2 &mdash; severe</th></tr>
+        </thead>
+        <tbody>
+          <tr><th>Healthy 25M, no symptoms</th><td class="n">0 &middot; low</td><td class="n">0 &middot; low</td><td class="n">0 &middot; low</td></tr>
+          <tr><th>Mild: 30F, fever + headache, day 2</th><td class="n">30.4 &middot; low</td><td class="n">0 &middot; low</td><td class="n">0 &middot; low</td></tr>
+          <tr><th>Typical: 35F, 4 symptoms, day 3</th><td class="n">45.1 &middot; medium</td><td class="n">1.1 &middot; low</td><td class="n">0 &middot; low</td></tr>
+          <tr><th>High risk: 72M, leukopenia + 4 comorbidities</th><td class="n">53.1 &middot; medium</td><td class="n em">69.3 &middot; high</td><td class="n em">70.1 &middot; high</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>The spread behaves as intended: the healthy profile sits at the floor rather than mid-range, mild illness registers on the case-definition model without triggering the severity models, and the severity models fire only for the profile that actually carries severity risk factors. Note that the numbers still carry the caveat from the opening box &mdash; 69.3 is a position, not a 69.3% chance of anything.</p>
+  </div>
+
+  <p class="note">The 35 / 65 cut-offs are engineering defaults, not calibrated boundaries. Recalibration on a prevalence-preserving sample is required before clinical use, and the evaluation log described in section 9 exists to make that possible.</p>
+
+  <h2><span class="num">8</span> The safety layer</h2>
+
+  <p>Section 3 recorded that leukopenia dominates both severity models &mdash; coefficient <b>1.600 in Model B</b> and <b>1.400 in Model B2</b>, in the latter behind only haematological disease. That is defensible epidemiology and a serious deployment hazard, because leukopenia is a full blood count result.</p>
+
+  <p>Consider the concrete failure. A patient reports <b>persistent vomiting and petechiae</b> &mdash; two WHO dengue warning signs &mdash; but has not had blood drawn, so answers "don't know" to leukopenia and the tourniquet test. Per section 2, "don't know" encodes as 0, correctly and faithfully. Without its strongest predictor the severity models see a modest symptom vector, and the patient can score <b>low on all three models</b>. That is false reassurance in precisely the situation where WHO guidance says to seek care.</p>
+
+  <div class="box">
+    <p class="box-label">Decision rule &mdash; independent of every model score</p>
+    <p>The backend applies a rule check over <code>VOMITO</code> and <code>PETEQUIA_N</code> before, and separately from, any scoring. If either is answered <i>yes</i>, the code is added to <code>warning_signs</code> in the response &mdash; regardless of what the three models returned.</p>
+    <p>The frontend then renders a prominent alert, and the advice prompt is explicitly instructed to recommend prompt medical assessment <b>irrespective of score</b>. A "don't know" never triggers the rule; only an affirmative answer does.</p>
+    <p>This is the design principle worth stating generally: <b>where a model has a known blind spot, the compensation belongs outside the model.</b> Nudging coefficients or lowering a threshold would have degraded discrimination for everyone in order to patch one specific hole. A deterministic rule fixes exactly the hole, is trivially auditable, and cannot be diluted by a future retrain.</p>
+  </div>
+
+  <h2><span class="num">9</span> Engineering choices worth defending</h2>
+
+  <ul>
+    <li><b>Tri-state answers, faithful to the training coding.</b> Every symptom and comorbidity offers <i>yes / no / don't know</i>, encoded 1 / 0 / 0. Offering only yes/no would have forced users to guess, and a guessed "no" on leukopenia is a fabricated observation. Reproducing SINAN's collapse of "no" and "unknown" keeps inference faithful to training &mdash; and it matters in practice, because leukopenia and the tourniquet test are among the strongest predictors and no member of the public knows their own values.</li>
+    <li><b>Five languages, chosen for the disease.</b> <code>zh-CN</code>, <code>zh-TW</code>, <code>en</code>, <code>es</code>, <code>pt</code>. Spanish and Portuguese cover Latin America, where the training data originates and where dengue is endemic; English serves as lingua franca; the Chinese variants cover southern China and Taiwan, within the expanding <i>Aedes</i> range. The language parameter controls the summary, advice, disclaimer, and model note; static UI strings are localised in the frontend, with the selection persisted to <code>localStorage</code> and a fallback to <code>navigator.language</code>.</li>
+    <li><b>Zero-dependency hand-written frontend.</b> Three files &mdash; <code>index.html</code>, <code>app.js</code>, <code>style.css</code> &mdash; served directly by FastAPI, with no build step, no framework, and no external requests. For a six-step form and two gauges, a bundler would have added supply-chain surface and deployment complexity for no user-visible benefit, and it keeps the service loadable over a poor connection.</li>
+    <li><b>44 tests, including two that guard the model contract.</b> <code>test_z_matches_hand_computed_value</code> recomputes a known linear predictor by hand and asserts the service agrees, so any silent change in feature ordering or lookup is caught rather than absorbed. <code>test_bundled_coefficients_match_research_output</code> fails if the deployed copy of the coefficients drifts from the research output in <code>model/results/</code>. Others verify that "don't know" encodes identically to "no", that the reference person scores 0 and the worst case 100, that the seasonal term cancels, that warning signs fire independently of score, and that the model note never claims a probability.</li>
+    <li><b>De-identified evaluation logging.</b> Each assessment appends one JSON line: timestamp, language, mock-mode flag, epidemiological week, the numeric feature vector, the three scores, and a <code>has_notes</code> boolean. <b>Free-text notes are never written to disk</b> &mdash; only whether one was supplied. Logging is disabled by setting an empty path, and a write failure is logged without affecting the response. This log is the raw material for the threshold recalibration that sections 5 and 7 say is required; a companion script reports per-model distributions and level shares.</li>
+  </ul>
+
+  <h2><span class="num">10</span> Deployment</h2>
+
+  <div class="tw">
+    <table>
+      <caption>Table 7 &mdash; Production environment</caption>
+      <thead>
+        <tr><th>Element</th><th>Choice</th></tr>
+      </thead>
+      <tbody>
+        <tr><th>Host</th><td>AWS Lightsail, Oregon (us-west-2), 2 vCPU / 2 GB RAM</td></tr>
+        <tr><th>OS</th><td>Ubuntu 24.04 LTS</td></tr>
+        <tr><th>Runtime</th><td>uvicorn, 2 workers, bound to <code>0.0.0.0:80</code></td></tr>
+        <tr><th>Process supervision</th><td>systemd unit, <code>Restart=always</code>, journal logging</td></tr>
+        <tr><th>Privilege model</th><td>Runs as unprivileged <code>ubuntu</code>; port 80 via <code>AmbientCapabilities=CAP_NET_BIND_SERVICE</code> with a matching <code>CapabilityBoundingSet</code> and <code>NoNewPrivileges=true</code></td></tr>
+        <tr><th>Not used</th><td>No Docker, no Kubernetes, no nginx, no reverse proxy</td></tr>
+        <tr><th>Live</th><td>http://35.88.114.45</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>The absences are the interesting part. A single-process Python service whose model is a 3 KB JSON file has no orchestration problem to solve; containers and a proxy tier would add operational surface without addressing any actual requirement. The one genuine issue &mdash; binding a privileged port without running as root &mdash; is solved by granting the process a single Linux capability, which is narrower than either a root process or an extra nginx hop. Deployment is a tarball, a virtualenv, and <code>systemctl enable --now</code>; redeployment is an extract and a restart. Health is verifiable at <code>GET /api/health</code>, which reports mock-mode state and the loaded model keys. The path to TLS is documented (move uvicorn to 8000, drop the capability lines, let nginx own 80/443) but deliberately not taken until a domain requires it.</p>
+
+  <div class="box">
+    <p class="box-label">What this project demonstrates end to end</p>
+    <p>A nine-million-record national surveillance archive was turned into three interpretable models with a documented feature contract, a defensible treatment of extreme class imbalance, and an external validation against published literature &mdash; including a check that <b>failed</b>, was investigated rather than discarded, and yielded a concrete account of what a diagnostic-grade dataset would need to collect.</p>
+    <p>The result was then characterised honestly: metrics labelled optimistic because the test sets are balanced, thresholds labelled uncalibrated because they are engineering defaults, and a structural ceiling (no true negatives) named as a property of the sampling frame rather than a deficiency to be tuned away.</p>
+    <p>And it was shipped. A 2.9 KB coefficient file, a deterministic encoder that reproduces the training conventions exactly, a scoring method built after two documented failures, a five-language interface, 44 tests including a hand-computed dot product and a drift check, de-identified logging designed to feed the recalibration the report says is needed &mdash; and a rule-based safety layer that fires independently of every model score, compensating for a blind spot the research itself identified.</p>
+  </div>
+
+  <p class="disclaimer"><b>Disclaimer.</b> The output of this system is a relative risk indicator, not a medical diagnosis. It must not be used to diagnose, treat, or rule out disease, and it cannot substitute for assessment by a qualified clinician. Anyone who is unwell, or whose symptoms worsen, should seek medical care.</p>
+
+  <h2><span class="num">&#8212;</span> References</h2>
+
+  <ol class="refs">
+    <li>Early diagnostic indicators of dengue versus other febrile illnesses in Asia and Latin America (IDAMS study). <i>Lancet Global Health</i> 2023; appendix 7, Table S11.</li>
+    <li>World Health Organization. <i>Dengue: Guidelines for Diagnosis, Treatment, Prevention and Control.</i> 2009.</li>
+    <li>Machine learning for predicting severe dengue in Puerto Rico. <i>Infectious Diseases of Poverty</i> 2025.</li>
+    <li>Brazilian Ministry of Health &mdash; DATASUS / SINAN dengue notification data (DENGBR23, DENGBR24, DENGBR25).</li>
+  </ol>
+
+  <hr class="end">
+  <footer>
+    <span>Dengue Risk Modelling &mdash; Technical Report</span>
+    <span>SINAN 2023&ndash;2025 &middot; n = 9,449,900</span>
+  </footer>
+
+</div>
