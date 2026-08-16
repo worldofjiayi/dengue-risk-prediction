@@ -1,0 +1,140 @@
+{
+  "A": {
+    "name": "模型A:登革热 vs 不确定(无真阴性)",
+    "n": 300000,
+    "pos": 150000,
+    "auc": 0.6862,
+    "sens": 0.7178,
+    "spec": 0.5472,
+    "coef": {
+      "FEBRE_x": 0.904,
+      "LEUCOPENIA_x": 0.601,
+      "wk_sin": 0.432,
+      "MIALGIA_x": 0.431,
+      "CEFALEIA_x": 0.409,
+      "NAUSEA_x": 0.219,
+      "PETEQUIA_N_x": 0.162,
+      "DOR_RETRO_x": 0.157,
+      "LACO_x": 0.113,
+      "DIABETES_x": 0.093,
+      "CONJUNTVIT_x": 0.081,
+      "AUTO_IMUNE_x": 0.068,
+      "DOR_COSTAS_x": 0.067,
+      "EXANTEMA_x": 0.061,
+      "VOMITO_x": 0.05,
+      "day_ill": 0.034,
+      "age": 0.007,
+      "HIPERTENSA_x": -0.003,
+      "sex_f": -0.029,
+      "RENAL_x": -0.032,
+      "ARTRITE_x": -0.084,
+      "HEMATOLOG_x": -0.129,
+      "ARTRALGIA_x": -0.13,
+      "HEPATOPAT_x": -0.222,
+      "wk_cos": -0.249,
+      "ACIDO_PEPT_x": -0.338
+    },
+    "cm": [
+      [
+        24624,
+        20376
+      ],
+      [
+        12697,
+        32303
+      ]
+    ]
+  },
+  "B": {
+    "name": "模型B:警示+重症(11+12) vs 普通(10)",
+    "n": 364246,
+    "pos": 164246,
+    "auc": 0.7218,
+    "sens": 0.6046,
+    "spec": 0.725,
+    "coef": {
+      "LEUCOPENIA_x": 1.6,
+      "VOMITO_x": 0.621,
+      "AUTO_IMUNE_x": 0.543,
+      "RENAL_x": 0.516,
+      "HIPERTENSA_x": 0.484,
+      "DIABETES_x": 0.389,
+      "HEMATOLOG_x": 0.371,
+      "PETEQUIA_N_x": 0.283,
+      "ARTRALGIA_x": 0.265,
+      "NAUSEA_x": 0.204,
+      "LACO_x": 0.185,
+      "day_ill": 0.134,
+      "HEPATOPAT_x": 0.125,
+      "FEBRE_x": 0.083,
+      "EXANTEMA_x": 0.037,
+      "DOR_RETRO_x": 0.017,
+      "CONJUNTVIT_x": 0.014,
+      "wk_cos": 0.009,
+      "age": 0.006,
+      "sex_f": -0.014,
+      "MIALGIA_x": -0.046,
+      "wk_sin": -0.18,
+      "ARTRITE_x": -0.358,
+      "CEFALEIA_x": -0.386,
+      "DOR_COSTAS_x": -0.391,
+      "ACIDO_PEPT_x": -0.673
+    },
+    "cm": [
+      [
+        43500,
+        16500
+      ],
+      [
+        19483,
+        29791
+      ]
+    ]
+  },
+  "B2": {
+    "name": "模型B2:重症(12) vs 其他登革热(10+11)",
+    "n": 212310,
+    "pos": 12310,
+    "auc": 0.8096,
+    "sens": 0.6992,
+    "spec": 0.7801,
+    "coef": {
+      "HEMATOLOG_x": 1.529,
+      "LEUCOPENIA_x": 1.4,
+      "RENAL_x": 1.289,
+      "VOMITO_x": 1.026,
+      "AUTO_IMUNE_x": 0.96,
+      "HIPERTENSA_x": 0.747,
+      "DIABETES_x": 0.655,
+      "HEPATOPAT_x": 0.642,
+      "PETEQUIA_N_x": 0.604,
+      "ARTRALGIA_x": 0.205,
+      "day_ill": 0.156,
+      "CONJUNTVIT_x": 0.077,
+      "NAUSEA_x": 0.043,
+      "FEBRE_x": 0.038,
+      "age": 0.019,
+      "EXANTEMA_x": 0.004,
+      "wk_cos": -0.015,
+      "wk_sin": -0.05,
+      "MIALGIA_x": -0.053,
+      "sex_f": -0.055,
+      "LACO_x": -0.071,
+      "DOR_RETRO_x": -0.213,
+      "DOR_COSTAS_x": -0.333,
+      "ARTRITE_x": -0.463,
+      "CEFALEIA_x": -0.725,
+      "ACIDO_PEPT_x": -0.748
+    },
+    "cm": [
+      [
+        46806,
+        13194
+      ],
+      [
+        1111,
+        2582
+      ]
+    ]
+  }
+}

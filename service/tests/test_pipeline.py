@@ -384,6 +384,26 @@ def test_coefficients_loaded_from_bundled_json():
     assert info["B2"]["auc"] == raw["B2"]["auc"] == 0.8096
 
 
+def test_bundled_coefficients_match_research_output():
+    """服务内嵌的系数必须与 model/results/ 下的研究产物完全一致。
+
+    仓库里有两份系数：研究侧的原始输出，以及服务打包时携带的副本。
+    这条测试防止两者漂移——重训模型后忘记同步会导致线上跑的是旧系数。
+    """
+    research = ROOT.parent / "model" / "results" / "模型结果_三模型指标与系数.json"
+    if not research.is_file():  # 仅部署了 service/ 子树时跳过
+        pytest.skip("研究产物不在此检出中（只部署了 service/）")
+
+    bundled = json.loads(
+        (ROOT / "app" / "model" / "dengue_models.json").read_text(encoding="utf-8")
+    )
+    source = json.loads(research.read_text(encoding="utf-8"))
+
+    for key in ("A", "B", "B2"):
+        assert bundled[key]["coef"] == source[key]["coef"], f"模型 {key} 系数已漂移"
+        assert bundled[key]["auc"] == source[key]["auc"]
+
+
 def test_more_symptoms_scores_higher():
     """症状与合并症越多，登革热与重症评分越高。"""
     from app.ml_model import DengueModel, encode_features

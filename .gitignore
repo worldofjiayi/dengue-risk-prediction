@@ -1,4 +1,6 @@
-# ===== 绝对不能提交：凭据与密钥 =====
+# ============================================================
+# NEVER COMMIT: credentials and keys
+# ============================================================
 account.txt
 *.pem
 *.key
@@ -6,12 +8,16 @@ account.txt
 .env.*
 !.env.example
 
-# ===== 用户数据 =====
-# 评估回流记录（含健康问卷特征），属个人健康数据，不入库
+# ============================================================
+# User data — assessment records contain health questionnaire
+# features and must not enter version control
+# ============================================================
 data/
 *.jsonl
 
-# ===== Python =====
+# ============================================================
+# Python
+# ============================================================
 .venv/
 venv/
 __pycache__/
@@ -21,14 +27,23 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 
-# ===== 原始研究材料（体积大且非本服务运行所需）=====
-# 应用只需要 app/model/dengue_models.json 里的系数
+# ============================================================
+# Local archives / working copies
+# The research materials live unpacked under model/ — the
+# original bundle itself is redundant.
+# ============================================================
 Dengue_项目分享.zip
-*.pdf
-*.docx
-*.pptx
+Domain-Adaptation-LLM-vs-Agentic.pdf
 
-# ===== 编辑器 / 系统 =====
+# Raw SINAN surveillance data is downloaded from DATASUS at
+# training time (~9.45M rows) and is never vendored here.
+model/data/
+*.parquet
+*.csv
+
+# ============================================================
+# Editors / OS
+# ============================================================
 .claude/
 .vscode/
 .idea/
