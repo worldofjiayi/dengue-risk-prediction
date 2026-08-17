@@ -40,13 +40,36 @@
         <div class="hero-badge" id="hero-badge">登革热 · 风险自评</div>
         <h1 class="hero-title" id="hero-title">登革热<br />风险自测</h1>
         <p class="hero-subtitle" id="hero-subtitle">回答症状与病史问题，获得风险参考与防护建议</p>
-        <button id="btn-start" class="btn btn-hero" type="button">
-          <span id="btn-start-text">开始评估</span>
-          <span class="btn-arrow" aria-hidden="true">→</span>
-        </button>
-        <ul class="hero-points" id="hero-points" aria-label="产品特点"></ul>
+
+        <!-- 两条入口：出行前查目的地 / 已有症状做自测（两种意图，刻意不混在一起） -->
+        <div class="hero-actions">
+          <button id="btn-destination" class="hero-cta" type="button">
+            <span class="hero-cta-icon" aria-hidden="true">✈️</span>
+            <span class="hero-cta-body">
+              <span class="hero-cta-title" id="btn-destination-title">我要去某个地方</span>
+              <span class="hero-cta-desc" id="btn-destination-desc">查看目的地的登革热情况</span>
+            </span>
+            <span class="btn-arrow" aria-hidden="true">→</span>
+          </button>
+          <button id="btn-start" class="hero-cta" type="button">
+            <span class="hero-cta-icon" aria-hidden="true">🌡️</span>
+            <span class="hero-cta-body">
+              <span class="hero-cta-title" id="btn-start-text">我有症状</span>
+              <span class="hero-cta-desc" id="btn-start-desc">回答几个问题，获得风险参考</span>
+            </span>
+            <span class="btn-arrow" aria-hidden="true">→</span>
+          </button>
+        </div>
       </div>
-      <p class="hero-disclaimer" id="hero-disclaimer">本结果仅供参考，不构成医疗诊断。如有不适请及时就医。</p>
+
+      <!-- 底部小字：免责声明 + 隐私说明 -->
+      <div class="hero-foot">
+        <p class="hero-disclaimer" id="hero-disclaimer">本结果仅供参考，不构成医疗诊断。如有不适请及时就医。</p>
+        <p class="hero-privacy">
+          <span id="hero-privacy-text">无需注册，不收集个人信息；补充说明不会被保存。</span>
+          <button id="btn-privacy" class="link-btn" type="button">隐私说明</button>
+        </p>
+      </div>
     </section>
 
     <!-- ② Wizard 视图（分步问卷） -->
@@ -55,14 +78,20 @@
         <header class="wizard-header">
           <div class="wizard-meta">
             <span class="wizard-brand" id="wizard-brand">🦟 登革热风险自测</span>
-            <span id="step-counter" class="step-counter">第 1 步 / 共 6 步</span>
+            <span id="step-counter" class="step-counter">第 1 步 / 共 7 步</span>
           </div>
           <div class="progress" role="progressbar" aria-label="问卷进度"
-               aria-valuemin="1" aria-valuemax="6" aria-valuenow="1">
+               aria-valuemin="1" aria-valuemax="7" aria-valuenow="1">
             <div class="progress-track"><div id="progress-fill" class="progress-fill"></div></div>
             <div id="progress-steps" class="progress-steps" aria-hidden="true"></div>
           </div>
         </header>
+
+        <!-- 问诊模式切换：智能问诊（自适应） / 完整问卷 -->
+        <div id="mode-toggle" class="mode-toggle" role="group" aria-label="选择问诊方式">
+          <button id="mode-adaptive" class="mode-btn" type="button" aria-pressed="true">智能问诊（推荐）</button>
+          <button id="mode-classic" class="mode-btn" type="button" aria-pressed="false">完整问卷</button>
+        </div>
 
         <div id="wizard-panel" class="wizard-panel card"><!-- 步骤内容由 app.js 渲染 --></div>
 
@@ -108,49 +137,127 @@
 
         <div class="card gauge-card">
           <div class="gauges">
-            <!-- 主仪表盘：登革热可能性（模型 A） -->
-            <div class="gauge-wrap gauge-primary" id="gauge-dengue">
-              <svg class="gauge" viewBox="0 0 220 220" role="img" aria-labelledby="label-dengue">
+            <!-- 主仪表盘：登革热可能性（模型 A）——可展开查看贡献项 -->
+            <button class="gauge-wrap gauge-primary" id="gauge-dengue" type="button"
+                    aria-expanded="false" aria-controls="explain-dengue">
+              <svg class="gauge" viewBox="0 0 220 220" aria-hidden="true" focusable="false">
                 <circle class="gauge-track" cx="110" cy="110" r="92" />
                 <circle id="arc-dengue" class="gauge-arc" cx="110" cy="110" r="92" />
               </svg>
-              <div class="gauge-center">
-                <div id="score-dengue" class="gauge-score">0</div>
-                <div class="gauge-unit" id="label-dengue">登革热可能性</div>
-                <div id="badge-dengue" class="level-badge">—</div>
-              </div>
-            </div>
+              <span class="gauge-center">
+                <span id="score-dengue" class="gauge-score">0</span>
+                <span class="gauge-unit" id="label-dengue">登革热可能性</span>
+                <span id="badge-dengue" class="level-badge">—</span>
+              </span>
+              <span class="gauge-why">
+                <span class="why-text" id="why-dengue">为什么是这个分数？</span>
+                <span class="why-caret" aria-hidden="true">▾</span>
+              </span>
+            </button>
 
-            <!-- 次仪表盘：重症风险（模型 B2） -->
-            <div class="gauge-wrap gauge-secondary" id="gauge-severe">
-              <svg class="gauge" viewBox="0 0 220 220" role="img" aria-labelledby="label-severe">
+            <!-- 次仪表盘：重症风险（模型 B2）——可展开查看贡献项 -->
+            <button class="gauge-wrap gauge-secondary" id="gauge-severe" type="button"
+                    aria-expanded="false" aria-controls="explain-severe">
+              <svg class="gauge" viewBox="0 0 220 220" aria-hidden="true" focusable="false">
                 <circle class="gauge-track" cx="110" cy="110" r="92" />
                 <circle id="arc-severe" class="gauge-arc" cx="110" cy="110" r="92" />
               </svg>
-              <div class="gauge-center">
-                <div id="score-severe" class="gauge-score">0</div>
-                <div class="gauge-unit" id="label-severe">重症风险</div>
-                <div id="badge-severe" class="level-badge">—</div>
-              </div>
-            </div>
+              <span class="gauge-center">
+                <span id="score-severe" class="gauge-score">0</span>
+                <span class="gauge-unit" id="label-severe">重症风险</span>
+                <span id="badge-severe" class="level-badge">—</span>
+              </span>
+              <span class="gauge-why">
+                <span class="why-text" id="why-severe">为什么是这个分数？</span>
+                <span class="why-caret" aria-hidden="true">▾</span>
+              </span>
+            </button>
           </div>
+
+          <!-- 贡献项面板（内容由 app.js 渲染） -->
+          <div id="explain-dengue" class="explain-panel" hidden></div>
+          <div id="explain-severe" class="explain-panel" hidden></div>
 
           <!-- 第三项：病情加重风险（模型 B），横条展示 -->
           <div class="bar-metric" id="metric-worsening">
-            <div class="bar-head">
+            <button class="bar-head" id="btn-explain-worsening" type="button"
+                    aria-expanded="false" aria-controls="explain-worsening">
               <span class="bar-label" id="label-worsening">病情加重风险</span>
               <span class="bar-value"><span id="score-worsening">0</span>
-                <span id="badge-worsening" class="level-badge level-inline">—</span></span>
-            </div>
+                <span id="badge-worsening" class="level-badge level-inline">—</span>
+                <span class="why-caret" aria-hidden="true">▾</span></span>
+            </button>
             <div class="bar-track"><div id="bar-worsening" class="bar-fill"></div></div>
           </div>
+          <div id="explain-worsening" class="explain-panel" hidden></div>
 
           <p id="result-summary" class="result-summary"></p>
           <p id="model-note" class="model-note"></p>
           <p id="epi-week-line" class="epi-week"></p>
         </div>
 
+        <!-- 流行病学暴露背景（规则判断，刻意不做成仪表盘） -->
+        <div id="exposure-chip" class="exposure-chip" hidden>
+          <span class="exposure-mark" aria-hidden="true">📍</span>
+          <div class="exposure-body">
+            <p class="exposure-line">
+              <span class="exposure-label" id="exposure-label">周围暴露情况</span>
+              <span class="exposure-level" id="exposure-level">—</span>
+            </p>
+            <p class="exposure-factors" id="exposure-factors"></p>
+            <p class="exposure-caption" id="exposure-caption"></p>
+          </div>
+        </div>
+
+        <!-- 旅行背景：来自目的地查询，刻意标注「未参与评分」 -->
+        <div id="travel-context" class="travel-card" hidden>
+          <span class="travel-mark" aria-hidden="true">✈️</span>
+          <div class="travel-body">
+            <p class="travel-line">
+              <span class="travel-label" id="travel-label">旅行背景</span>
+              <span class="travel-level" id="travel-level"></span>
+            </p>
+            <p class="travel-place" id="travel-place"></p>
+            <p class="travel-season" id="travel-season" hidden></p>
+            <p class="travel-caption" id="travel-caption"></p>
+          </div>
+        </div>
+        <p class="travel-offer" id="travel-offer" hidden>
+          <span id="travel-offer-text"></span>
+          <button id="btn-travel-offer" class="link-btn" type="button"></button>
+        </p>
+
         <div id="advice-cards" class="advice-grid"><!-- 建议卡片由 app.js 渲染 --></div>
+
+        <!-- AI 追问对话 -->
+        <section class="card chat-card" id="chat-card">
+          <header class="chat-head">
+            <span class="chat-icon" aria-hidden="true">💬</span>
+            <div class="chat-headings">
+              <h3 class="chat-title" id="chat-title">追问一下</h3>
+              <p class="chat-sub" id="chat-sub">针对上面的结果提问，AI 助手会用你选择的语言回答</p>
+            </div>
+          </header>
+
+          <div class="chat-chips" id="chat-chips"></div>
+
+          <div class="chat-log" id="chat-log" role="log" aria-live="polite" aria-label="对话记录">
+            <p class="chat-empty" id="chat-empty">先从下面挑一个问题，或者直接输入你的问题。</p>
+          </div>
+
+          <form class="chat-form" id="chat-form">
+            <label class="sr-only" for="chat-input" id="chat-input-label">你的问题</label>
+            <textarea id="chat-input" class="chat-input" rows="1" maxlength="500"
+                      placeholder="输入你的问题…"></textarea>
+            <button id="chat-send" class="btn btn-primary chat-send" type="submit">发送</button>
+          </form>
+
+          <div class="chat-foot">
+            <span class="chat-counter" id="chat-counter">0 / 500</span>
+            <span class="chat-note" id="chat-note"></span>
+            <button id="btn-privacy-chat" class="link-btn" type="button">隐私说明</button>
+          </div>
+        </section>
 
         <div class="result-actions">
           <button id="btn-restart" class="btn btn-primary" type="button">重新评估</button>
@@ -158,6 +265,56 @@
         </div>
       </div>
       <div id="disclaimer-bar" class="disclaimer-bar">本结果仅供参考，不构成医疗诊断。如有不适请及时就医。</div>
+    </section>
+
+    <!-- ⑤ Destination 视图（出行前查目的地；刻意不出任何风险评分） -->
+    <section id="view-destination" class="view" hidden>
+      <div class="shell dest-shell">
+        <header class="dest-header">
+          <button id="btn-dest-back" class="back-btn" type="button">
+            <span class="back-arrow" aria-hidden="true">←</span>
+            <span id="btn-dest-back-text">返回</span>
+          </button>
+          <h2 class="dest-title" id="dest-title" tabindex="-1">目的地登革热情况</h2>
+          <p class="dest-sub" id="dest-sub"></p>
+        </header>
+
+        <form class="dest-form card" id="dest-form" novalidate>
+          <label class="field-label" for="dest-input" id="dest-input-label">目的地</label>
+          <div class="dest-input-row">
+            <input id="dest-input" class="dest-input" type="text" name="location"
+                   maxlength="120" autocomplete="off" spellcheck="false" />
+            <button id="dest-submit" class="btn btn-primary dest-submit" type="submit">查询</button>
+          </div>
+          <p class="dest-hint" id="dest-hint" role="alert" hidden></p>
+          <p class="dest-examples-label" id="dest-examples-label"></p>
+          <div class="dest-chips" id="dest-chips"></div>
+        </form>
+
+        <div class="dest-loading" id="dest-loading" hidden>
+          <div class="pulse" aria-hidden="true">
+            <span class="pulse-ring r1"></span>
+            <span class="pulse-ring r2"></span>
+            <span class="pulse-ring r3"></span>
+            <span class="pulse-core">🌍</span>
+          </div>
+          <p id="dest-loading-text" class="loading-text" aria-live="polite"></p>
+          <p id="dest-loading-sub" class="loading-sub"></p>
+        </div>
+
+        <div class="dest-error" id="dest-error" role="alert" hidden>
+          <span class="dest-error-icon" aria-hidden="true">⚠️</span>
+          <p class="dest-error-text" id="dest-error-text"></p>
+          <button id="dest-retry" class="btn btn-secondary dest-retry" type="button">重试</button>
+        </div>
+
+        <div class="dest-results" id="dest-results" hidden><!-- 结果由 app.js 渲染 --></div>
+
+        <p class="dest-cross">
+          <button id="btn-dest-to-symptoms" class="link-btn" type="button"></button>
+        </p>
+      </div>
+      <div id="dest-disclaimer-bar" class="disclaimer-bar">本结果仅供参考，不构成医疗诊断。如有不适请及时就医。</div>
     </section>
 
   </main>
@@ -172,6 +329,22 @@
       <div class="overlay-actions">
         <button id="btn-retry" class="btn btn-primary" type="button">重试</button>
         <button id="btn-error-close" class="btn btn-secondary" type="button">返回修改</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 隐私说明浮层 -->
+  <div id="privacy-overlay" class="overlay" hidden>
+    <div class="overlay-backdrop" aria-hidden="true"></div>
+    <div class="overlay-card card privacy-card" role="dialog" aria-modal="true"
+         aria-labelledby="privacy-title" aria-describedby="privacy-intro">
+      <div class="overlay-icon" aria-hidden="true">🔒</div>
+      <h3 id="privacy-title" class="overlay-title">隐私说明</h3>
+      <p id="privacy-intro" class="privacy-intro"></p>
+      <ul id="privacy-list" class="privacy-list"></ul>
+      <p id="privacy-foot" class="privacy-foot"></p>
+      <div class="overlay-actions">
+        <button id="btn-privacy-close" class="btn btn-primary" type="button">知道了</button>
       </div>
     </div>
   </div>

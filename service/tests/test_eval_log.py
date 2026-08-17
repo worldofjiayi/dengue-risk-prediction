@@ -23,6 +23,7 @@ VALID_FORM = {
         "LEUCOPENIA": "unknown",
     },
     "comorbidities": {"DIABETES": "no", "HIPERTENSA": "yes"},
+    "exposure": {"CONFIRMED_CASE": "yes", "FEVER_CLUSTER": "no"},
     "language": "en",
     "notes": SENSITIVE_NOTE,
 }
@@ -100,6 +101,51 @@ def test_assess_appends_sanitized_record(client, log_path):
     assert "110101199001010011" not in raw
 
 
+def test_record_includes_exposure_answers_and_level(client, log_path):
+    """暴露答案与规则判出的等级都要落盘（分类答案，不可定位到个人）。"""
+    assert client.post("/api/assess", json=VALID_FORM).status_code == 200
+    record = json.loads(log_path.read_text(encoding="utf-8").splitlines()[0])
+
+    assert record["exposure"] == {
+        "FEVER_CLUSTER": "no",
+        "CONFIRMED_CASE": "yes",
+        "OUTBREAK_TRAVEL": "unknown",  # 未作答的键补为 unknown
+    }
+    assert record["exposure_level"] == "high"
+
+    # 暴露答案绝不能混进 26 维特征
+    from app.schemas import EXPOSURE_CODES, FEATS
+
+    assert set(record["features"]) == set(FEATS)
+    assert not set(record["features"]) & set(EXPOSURE_CODES)
+
+
+def test_record_exposure_level_matches_response(client, log_path):
+    """回流里的暴露等级与 API 返回的 exposure_context 一致。"""
+    body = client.post(
+        "/api/assess",
+        json={**VALID_FORM, "exposure": {"FEVER_CLUSTER": "yes"}},
+    ).json()
+    record = json.loads(log_path.read_text(encoding="utf-8").splitlines()[0])
+
+    assert body["exposure_context"]["level"] == "medium"
+    assert record["exposure_level"] == "medium"
+    assert record["exposure"]["FEVER_CLUSTER"] == "yes"
+
+
+def test_record_exposure_defaults_when_form_omits_it(client, log_path):
+    form = {k: v for k, v in VALID_FORM.items() if k != "exposure"}
+    assert client.post("/api/assess", json=form).status_code == 200
+    record = json.loads(log_path.read_text(encoding="utf-8").splitlines()[0])
+
+    assert record["exposure"] == {
+        "FEVER_CLUSTER": "unknown",
+        "CONFIRMED_CASE": "unknown",
+        "OUTBREAK_TRAVEL": "unknown",
+    }
+    assert record["exposure_level"] == "low"
+
+
 def test_multiple_assessments_append(client, log_path):
     for _ in range(3):
         assert client.post("/api/assess", json=VALID_FORM).status_code == 200
@@ -160,11 +206,12 @@ def _record(
     language: str = "zh-CN",
     mock: bool = True,
     week: int = 33,
+    exposure_level: str | None = "low",
 ) -> dict:
     def block(score: float) -> dict:
         return {"score": score, "level": level, "z": 0.0}
 
-    return {
+    record = {
         "timestamp": "2026-08-16T00:00:00+00:00",
         "language": language,
         "mock_mode": mock,
@@ -177,6 +224,15 @@ def _record(
         },
         "has_notes": False,
     }
+    # exposure_level=None 模拟加入暴露问题之前的旧记录
+    if exposure_level is not None:
+        record["exposure"] = {
+            "FEVER_CLUSTER": "yes" if exposure_level == "medium" else "no",
+            "CONFIRMED_CASE": "yes" if exposure_level == "high" else "no",
+            "OUTBREAK_TRAVEL": "no",
+        }
+        record["exposure_level"] = exposure_level
+    return record
 
 
 def test_compute_stats():
@@ -219,6 +275,46 @@ def test_compute_stats_empty():
     stats = compute_stats([])
     assert stats["total"] == 0
     assert stats["models"] == {}
+    assert stats["exposure_levels"] == {}
+
+
+def test_compute_stats_exposure_level_distribution():
+    from scripts.eval_stats import compute_stats
+
+    records = [
+        _record(10.0, 5.0, "low", exposure_level="low"),
+        _record(20.0, 15.0, "low", exposure_level="low"),
+        _record(50.0, 45.0, "medium", exposure_level="medium"),
+        _record(90.0, 85.0, "high", exposure_level="high"),
+    ]
+    stats = compute_stats(records)
+    assert stats["exposure_levels"] == {"high": 1, "low": 2, "medium": 1}
+
+
+def test_compute_stats_ignores_records_without_exposure_level():
+    """加入暴露问题之前的旧记录不该被计成某个档位。"""
+    from scripts.eval_stats import compute_stats
+
+    records = [
+        _record(10.0, 5.0, "low", exposure_level=None),   # 旧记录
+        _record(50.0, 45.0, "medium", exposure_level="high"),
+    ]
+    stats = compute_stats(records)
+    assert stats["total"] == 2
+    assert stats["exposure_levels"] == {"high": 1}
+
+
+def test_eval_stats_report_prints_exposure_distribution(tmp_path, capsys):
+    from scripts.eval_stats import compute_stats, print_report
+
+    records = [
+        _record(10.0, 5.0, "low", exposure_level="low"),
+        _record(90.0, 85.0, "high", exposure_level="high"),
+    ]
+    print_report(compute_stats(records), 0, tmp_path / "assessments.jsonl")
+    out = capsys.readouterr().out
+    assert "流行病学暴露等级分布" in out
+    assert "high" in out
 
 
 def test_load_records_skips_malformed_lines(tmp_path):

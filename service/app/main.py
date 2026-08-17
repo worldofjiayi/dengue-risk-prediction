@@ -8,8 +8,21 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
 from app.deepseek_client import DeepSeekError
-from app.pipeline import run_assessment
-from app.schemas import AssessmentResult, FormInput
+from app.destination import run_destination
+from app.pipeline import run_assessment, run_chat
+from app.planner import plan
+from app.schemas import (
+    SERVER_ERRORS,
+    UPSTREAM_ERRORS,
+    AssessmentResult,
+    ChatRequest,
+    ChatResponse,
+    DestinationRequest,
+    DestinationResponse,
+    FormInput,
+    PlanRequest,
+    PlanResponse,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,20 +45,95 @@ app = FastAPI(
 
 @app.post("/api/assess", response_model=AssessmentResult)
 async def assess(form: FormInput) -> AssessmentResult:
-    """接收问卷，返回风险评估结果。"""
+    """接收问卷，返回风险评估结果。
+
+    注意：**上游 LLM 失败不再让这个接口失败**。评分、警示征象、暴露背景、
+    贡献拆解全都在本地算出，建议文本失败时由 pipeline 退回模板并把
+    advice_source 标成 "template"（详见 pipeline 模块说明）。因此下面的 502
+    分支现在是纯防御——真的走到这里，说明流水线里出现了没被兜住的新失败点。
+    """
     try:
         return await run_assessment(form)
     except DeepSeekError as exc:
-        logger.error("上游 DeepSeek 服务错误：%s", exc)
+        logger.error("上游 DeepSeek 服务错误（评估流程未兜住）：%s", exc)
         raise HTTPException(
-            status_code=502, detail="上游模型服务暂时不可用，请稍后重试。"
+            status_code=502,
+            detail=UPSTREAM_ERRORS.get(form.language, UPSTREAM_ERRORS["zh-CN"]),
         ) from exc
     except HTTPException:
         raise
     except Exception as exc:
         logger.exception("评估流程发生未知错误")
         raise HTTPException(
-            status_code=500, detail="服务器内部错误，请稍后重试。"
+            status_code=500,
+            detail=SERVER_ERRORS.get(form.language, SERVER_ERRORS["zh-CN"]),
+        ) from exc
+
+
+@app.post("/api/chat", response_model=ChatResponse)
+async def chat(req: ChatRequest) -> ChatResponse:
+    """就用户自己的评估结果做追问。无状态：上下文与历史由前端回传。
+
+    错误提示按请求语言本地化——聊天窗口里冒出一句中文报错，对西语用户
+    比没有回复更让人困惑。
+    """
+    try:
+        return await run_chat(req)
+    except DeepSeekError as exc:
+        logger.error("追问对话上游错误：%s", exc)
+        raise HTTPException(
+            status_code=502, detail=UPSTREAM_ERRORS.get(req.language, UPSTREAM_ERRORS["zh-CN"])
+        ) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("追问对话发生未知错误")
+        raise HTTPException(
+            status_code=500, detail=SERVER_ERRORS.get(req.language, SERVER_ERRORS["zh-CN"])
+        ) from exc
+
+
+@app.post("/api/destination", response_model=DestinationResponse)
+async def destination(req: DestinationRequest) -> DestinationResponse:
+    """行前查询：某地最近三个月的登革热情况（地区表 + WHO 通报 + 联网检索）。
+
+    **这个接口不返回任何评分**：地点是行前参考，从来不参与打分。
+
+    上游检索失败不会让它失败——地区表与 WHO 通报是本地/公开数据，照常返回，
+    只是 search_status 降级为 degraded（详见 app.destination 模块说明）。
+    因此这里的 502 分支是纯防御。
+    """
+    try:
+        return await run_destination(req)
+    except DeepSeekError as exc:
+        logger.error("目的地查询上游错误（未兜住）：%s", exc)
+        raise HTTPException(
+            status_code=502,
+            detail=UPSTREAM_ERRORS.get(req.language, UPSTREAM_ERRORS["zh-CN"]),
+        ) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("目的地查询发生未知错误")
+        raise HTTPException(
+            status_code=500,
+            detail=SERVER_ERRORS.get(req.language, SERVER_ERRORS["zh-CN"]),
+        ) from exc
+
+
+@app.post("/api/plan", response_model=PlanResponse)
+async def plan_questions(req: PlanRequest) -> PlanResponse:
+    """自适应问诊规划：分数硬边界、能否证明性地停止、接下来最值得问的问题。
+
+    完全确定性的计算（只用模型系数），不调用任何 LLM，无副作用。
+    """
+    try:
+        return plan(req)
+    except Exception as exc:
+        logger.exception("问诊规划发生未知错误")
+        raise HTTPException(
+            status_code=500,
+            detail=SERVER_ERRORS.get(req.language, SERVER_ERRORS["zh-CN"]),
         ) from exc
 
 

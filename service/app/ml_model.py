@@ -45,6 +45,10 @@ wk_sin/wk_cos 描述的是人群层面的季节基线，不是个体风险差异
 训练数据 SINAN 用 1=有、2=无、9=未知，特征工程里 (df[c] == "1") 意味着
 「无」和「未知」都编码为 0。本模块的 yes→1 / no→0 / unknown→0 与之一致。
 
+问卷里的三个流行病学暴露问题（EXPOSURE_CODES）**不会进入这里**：
+SINAN 数据没有这些变量，模型也就没有对应系数。encode_features 只读取
+symptoms / comorbidities / age / sex / day_ill，26 维向量与暴露答案无关。
+
 季节项 wk_sin / wk_cos 由服务器按评估当日的 ISO 周计算，用户不填写。
 ⚠️ 模型训练于南半球（巴西）数据，季节项对北半球用户方向相反；
 赤道地区季节性本身较弱，影响有限，但这是已知的迁移局限。
@@ -59,7 +63,9 @@ from pathlib import Path
 from app.schemas import (
     COMORB_CODES,
     FEATS,
+    NON_BINARY_FEATS,
     SYMPTOM_CODES,
+    FeatureContribution,
     FormInput,
     MLFeatures,
     ModelScore,
@@ -75,6 +81,10 @@ _MEDIUM_MAX = 65.0
 
 # 模型键 -> 结果字段名
 MODEL_KEYS: tuple[str, ...] = ("A", "B", "B2")
+RESULT_FIELDS: dict[str, str] = {"A": "dengue", "B": "worsening", "B2": "severe"}
+
+# 每个模型最多返回几条贡献项
+EXPLAIN_TOP_N = 5
 
 
 # 参考人的年龄（用于锚定 0 分基准，不随用户年龄变化）
@@ -147,7 +157,10 @@ def _answer_to_int(answer: str) -> int:
 
 
 def encode_features(form: FormInput, ref_date: date | None = None) -> MLFeatures:
-    """问卷答案 -> 26 个模型特征（确定性编码，不依赖任何外部服务）。"""
+    """问卷答案 -> 26 个模型特征（确定性编码，不依赖任何外部服务）。
+
+    注意：form.exposure 在此被**刻意忽略**。见模块文档「特征编码」一节。
+    """
     values: dict[str, float | int] = {}
     for code in SYMPTOM_CODES:
         values[f"{code}_x"] = _answer_to_int(form.symptoms[code])
@@ -163,12 +176,36 @@ def encode_features(form: FormInput, ref_date: date | None = None) -> MLFeatures
     return MLFeatures(**values)
 
 
+def feature_code(name: str) -> str:
+    """特征名 -> 前端查表用的标签键。
+
+    症状与合并症去掉 `_x` 后缀（FEBRE_x -> FEBRE），这样前端可以直接复用
+    问卷里已有的多语言标签；5 个非二值特征没有对应的问卷项，用原名。
+    """
+    if name in NON_BINARY_FEATS:
+        return name
+    return name[:-2] if name.endswith("_x") else name
+
+
 def _level(score: float) -> str:
     if score < _LOW_MAX:
         return "low"
     if score <= _MEDIUM_MAX:
         return "medium"
     return "high"
+
+
+def score_from_z(coef: dict[str, float], z: float, wk_sin: float, wk_cos: float) -> float:
+    """线性预测值 z -> 0-100 相对分数（参考人锚定，裁剪，保留 1 位小数）。
+
+    score_one 与 planner 的区间端点都必须经过同一个函数，
+    保证同一个 z 在任何路径下得到完全相同的分数。
+    """
+    z_ref = _reference_z(coef, wk_sin, wk_cos)
+    z_ceil = _ceiling_z(coef, wk_sin, wk_cos)
+    span = z_ceil - z_ref
+    ratio = (z - z_ref) / span if span > 0 else 0.0
+    return round(100.0 * max(0.0, min(1.0, ratio)), 1)
 
 
 class DengueModel:
@@ -187,17 +224,59 @@ class DengueModel:
         coef = self._models[key]["coef"]
         data = features.model_dump()
         z = sum(coef.get(name, 0.0) * float(data[name]) for name in FEATS)
-
-        z_ref = _reference_z(coef, data["wk_sin"], data["wk_cos"])
-        z_ceil = _ceiling_z(coef, data["wk_sin"], data["wk_cos"])
-        span = z_ceil - z_ref
-        ratio = (z - z_ref) / span if span > 0 else 0.0
-        score = round(100.0 * max(0.0, min(1.0, ratio)), 1)
+        score = score_from_z(coef, z, data["wk_sin"], data["wk_cos"])
         return ModelScore(score=score, level=_level(score), z=round(z, 4))
 
     def score_all(self, features: MLFeatures) -> dict[str, ModelScore]:
         """三个模型全部打分，返回 {"A":…, "B":…, "B2":…}。"""
         return {key: self.score_one(key, features) for key in MODEL_KEYS}
+
+    def explain_one(
+        self, key: str, features: MLFeatures, top_n: int = EXPLAIN_TOP_N
+    ) -> list[FeatureContribution]:
+        """拆解单个模型的 z，返回贡献最大的若干项。
+
+        z = Σ coef × feature，因此每一项 coef[name] × value 就是该特征对本次
+        评分的加减量——这是逻辑回归可解释性的全部内容，没有任何近似。
+
+        贡献为 0 的项（特征值为 0，或系数缺失）直接跳过：它们对结果没有影响，
+        列出来只会稀释真正起作用的那几项。按绝对值降序，取前 top_n 条。
+        """
+        coef = self._models[key]["coef"]
+        data = features.model_dump()
+
+        items: list[tuple[float, FeatureContribution]] = []
+        for name in FEATS:
+            contribution = coef.get(name, 0.0) * float(data[name])
+            if contribution == 0.0:
+                continue
+            items.append(
+                (
+                    abs(contribution),
+                    FeatureContribution(
+                        feature=name,
+                        code=feature_code(name),
+                        contribution=round(contribution, 4),
+                        direction="up" if contribution > 0 else "down",
+                    ),
+                )
+            )
+
+        items.sort(key=lambda pair: pair[0], reverse=True)
+        return [item for _, item in items[:top_n]]
+
+    def explain_all(
+        self, features: MLFeatures, top_n: int = EXPLAIN_TOP_N
+    ) -> dict[str, list[FeatureContribution]]:
+        """三个模型的贡献拆解，键为响应字段名 dengue / worsening / severe。"""
+        return {
+            RESULT_FIELDS[key]: self.explain_one(key, features, top_n)
+            for key in MODEL_KEYS
+        }
+
+    def coefficients(self, key: str) -> dict[str, float]:
+        """某个模型的系数字典（只读用途，供 planner 计算分数边界与信息价值）。"""
+        return self._models[key]["coef"]
 
     def info(self) -> dict[str, dict]:
         """模型元信息（名称与 AUC），供 /api/health 等展示。"""

@@ -11,8 +11,13 @@ account.txt
 # ============================================================
 # User data — assessment records contain health questionnaire
 # features and must not enter version control
+#
+# Anchored to the runtime log directory only. A bare `data/`
+# would also swallow service/app/data/, which holds reference
+# tables the app needs at run time — they must be committed.
 # ============================================================
-data/
+/service/data/
+/data/
 *.jsonl
 
 # ============================================================
