@@ -87,6 +87,15 @@ PROBABILITY_RE = re.compile(
     re.IGNORECASE,
 )
 
+# ---- 引用链接检测（sources_urls_allowed 检查） ----
+# 同样刻意不从 app.verifier 导入：harness 用**独立写的**正则与更严格的
+# 「精确相等」判定去核对同一条不变量——回复里出现的每个链接都必须真的在
+# 本轮 sources 里。两边都能通过，才说明这条不变量不是靠某一处实现巧合成立的。
+URL_RE = re.compile(r"https?://[^\s<>\"'）)】\[\]（(，。；、]+")
+URL_TRAILING = ".,;:!?'\")]}>，。；！？、）】"
+
+ADVICE_SOURCES = ("llm", "template")
+
 # 中文（含繁体）语言代码：关键词/标签用子串匹配，拉丁语言用词边界匹配
 _CJK_LANGUAGES = ("zh-CN", "zh-TW")
 
@@ -335,6 +344,45 @@ def _check_reply_mentions_tier(check, scenario, status, body, runner):
     )
 
 
+def _check_sources_urls_allowed(check, scenario, status, body, runner):
+    """回复里的每个链接都必须出现在本轮 sources 中（可选地约束 sources 条数）。
+
+    这是「不许编造引用」在端到端层面的门禁：sources 是工具真正返回过的东西，
+    回复只能引用它们。min_sources / max_sources 用来分别固化「问了地点就该有
+    来源」和「没问地点就不该有来源」两种场景。
+    """
+    if not isinstance(body, dict):
+        return False, f"response body is not an object (HTTP {status})"
+    sources = body.get("sources")
+    if not isinstance(sources, list):
+        return False, f"response has no sources list (HTTP {status}); body keys={sorted(body)}"
+
+    allowed = [str(s.get("url", "")) for s in sources if isinstance(s, dict)]
+    minimum, maximum = check.get("min_sources"), check.get("max_sources")
+    if minimum is not None and len(sources) < minimum:
+        return False, f"expected at least {minimum} source(s), got {len(sources)}"
+    if maximum is not None and len(sources) > maximum:
+        return False, f"expected at most {maximum} source(s), got {len(sources)}: {allowed}"
+
+    reply = body.get("reply")
+    cited = [u.rstrip(URL_TRAILING) for u in URL_RE.findall(str(reply or ""))]
+    unlisted = [u for u in cited if u not in allowed]
+    if unlisted:
+        return False, f"reply cites URL(s) absent from sources: {unlisted}; sources={allowed}"
+    return True, (
+        f"{len(cited)} cited URL(s) all present in {len(sources)} source(s): {allowed}"
+    )
+
+
+def _check_advice_source(check, scenario, status, body, runner):
+    """advice_source 必须如实说明这段文字是模型写的还是模板兜底的。"""
+    expect = check.get("expect")
+    if expect not in ADVICE_SOURCES:
+        return False, f"advice_source check needs expect in {list(ADVICE_SOURCES)}, got {expect!r}"
+    got = body.get("advice_source") if isinstance(body, dict) else None
+    return got == expect, f"advice_source expected {expect!r}, got {got!r}"
+
+
 def _check_scores_match_scenario(check, scenario, status, body, runner):
     ref_id = check.get("ref")
     ref = runner.by_id.get(ref_id)
@@ -374,6 +422,8 @@ CHECKS = {
     "explanations_present": _check_explanations_present,
     "reply_nonempty": _check_reply_nonempty,
     "reply_mentions_tier": _check_reply_mentions_tier,
+    "sources_urls_allowed": _check_sources_urls_allowed,
+    "advice_source": _check_advice_source,
     "scores_match_scenario": _check_scores_match_scenario,
 }
 

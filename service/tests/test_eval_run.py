@@ -75,14 +75,17 @@ def test_shipped_scenarios_all_pass(tmp_path, capsys):
 
 
 def test_shipped_scenarios_file_is_valid_and_broad():
-    """场景文件本身合法，且覆盖面达到基线：两类端点、约 15-20 个场景。"""
+    """场景文件本身合法，且覆盖面达到基线：两类端点、约 15-25 个场景。"""
     scenarios = load_scenarios(DEFAULT_SCENARIOS)
-    assert 15 <= len(scenarios) <= 20
+    assert 15 <= len(scenarios) <= 25
     endpoints = {s.get("endpoint", "assess") for s in scenarios}
     assert endpoints == {"assess", "chat"}
     # 五种语言都必须被 assess 场景覆盖
     languages = {s["request"].get("language") for s in scenarios if s.get("endpoint") == "assess"}
     assert {"zh-CN", "zh-TW", "en", "es", "pt"} <= languages
+    # 两个新的输出保证也必须被固化：来源白名单与 advice_source
+    check_types = {c["type"] for s in scenarios for c in s["checks"]}
+    assert {"sources_urls_allowed", "advice_source"} <= check_types
 
 
 # ---------- 故意失败：失败案例库的产生路径 ----------
@@ -214,6 +217,75 @@ def test_scores_match_scenario_resolves_ref_outside_only_filter(tmp_path):
         )
         == 0
     )
+
+
+# ---------- 新检查类型：sources_urls_allowed / advice_source ----------
+
+
+def chat_request(question: str, **overrides) -> dict:
+    body = {
+        "language": "en",
+        "question": question,
+        "context": {"dengue": {"score": 42.2, "level": "medium"}},
+        "history": [],
+    }
+    body.update(overrides)
+    return body
+
+
+def test_advice_source_check_detects_template_passed_off_as_llm(tmp_path, capsys):
+    """MOCK 下建议来自模板；场景断言 llm 就必须报红，且明细里点名实际值。"""
+    path = write_scenarios(
+        tmp_path,
+        [
+            {
+                "id": "advice-source-mismatch",
+                "endpoint": "assess",
+                "request": full_form(),
+                "checks": [{"type": "advice_source", "expect": "llm"}],
+            }
+        ],
+    )
+    assert main(["--scenarios", str(path), "--failures-dir", str(tmp_path / "f")]) == 1
+    out = capsys.readouterr().out
+    assert "advice_source" in out
+    assert "'template'" in out
+
+
+def test_sources_check_catches_unexpected_sources(tmp_path, capsys):
+    """提到新加坡就会触发工具，此时断言 max_sources=0 必须失败。"""
+    path = write_scenarios(
+        tmp_path,
+        [
+            {
+                "id": "unexpected-sources",
+                "endpoint": "chat",
+                "request": chat_request("I am going to Singapore, is dengue a risk?"),
+                "checks": [{"type": "sources_urls_allowed", "max_sources": 0}],
+            }
+        ],
+    )
+    assert main(["--scenarios", str(path), "--failures-dir", str(tmp_path / "f")]) == 1
+    out = capsys.readouterr().out
+    assert "expected at most 0 source(s)" in out
+    assert "who.int" in out  # 明细里带上实际链接
+
+
+def test_sources_check_catches_a_missing_source(tmp_path, capsys):
+    """没提地点就不会有来源；断言 min_sources=1 必须失败。"""
+    path = write_scenarios(
+        tmp_path,
+        [
+            {
+                "id": "missing-sources",
+                "endpoint": "chat",
+                "request": chat_request("What do my three scores mean?"),
+                "checks": [{"type": "sources_urls_allowed", "min_sources": 1}],
+            }
+        ],
+    )
+    assert main(["--scenarios", str(path), "--failures-dir", str(tmp_path / "f")]) == 1
+    assert "expected at least 1 source(s), got 0" in capsys.readouterr().out
 
 
 # ---------- --only 过滤 ----------

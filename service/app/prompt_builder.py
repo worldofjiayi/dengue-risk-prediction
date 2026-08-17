@@ -5,8 +5,11 @@
   advice   —— 根据三个模型的评分生成目标语言的登革热防护与就医建议。
 追问接口（POST /api/chat）：
   chat     —— 就用户自己的评估结果做保守的健康科普问答，输出纯文本。
+              这一次调用带一个工具（lookup_dengue_context），由模型自己决定
+              要不要查某地的登革热背景与 WHO 通报。
 """
 
+from app.intel import INTEL_TOOL_NAME
 from app.schemas import (
     COMORB_CODES,
     EXPOSURE_CODES,
@@ -214,6 +217,65 @@ def build_advice_prompt(
 
 _CHAT_ROLE_LABELS = {"user": "用户", "assistant": "助手"}
 
+# ---- 模型可自主调用的工具：地区登革热背景 + WHO 疾病暴发新闻 ----
+#
+# 描述里写清「什么时候该调用」，是因为这决定了工具有没有用；
+# 写清「只能用返回的数据作答、只能引用返回的链接」，是因为这决定了
+# 工具会不会变成幻觉的放大器。出口处还有 verifier.verify_chat_reply
+# 兜底核对链接——提示词是第一道，校验器是最后一道。
+
+DENGUE_CONTEXT_TOOL: dict = {
+    "type": "function",
+    "function": {
+        "name": INTEL_TOOL_NAME,
+        "description": (
+            "Look up the dengue situation for a country or territory: its endemicity tier "
+            "(high / moderate / low / none), a short note on the transmission season, and up to "
+            "three recent WHO Disease Outbreak News items with their titles, dates and URLs.\n"
+            "Call this whenever the user mentions a place — travelling to it, going there, moving "
+            "there, living or working there, or asking whether somewhere is risky. Call it once per "
+            "place mentioned.\n"
+            "Answer only from what this function returns. Do not add countries, case numbers, "
+            "seasons or outbreaks from your own memory. Cite only the URLs it returns, exactly as "
+            "returned — never construct or guess a who.int link. If it returns matched=false, or "
+            "lookup_failed=true, or an empty who_notices list, say plainly that you could not find "
+            "that information rather than filling the gap."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "location": {
+                    "type": "string",
+                    "description": (
+                        "The country, territory or city the user named, in any language "
+                        "(e.g. 'Singapore', '新加坡', 'Tailandia', 'Brasil')."
+                    ),
+                }
+            },
+            "required": ["location"],
+            "additionalProperties": False,
+        },
+    },
+}
+
+# system prompt 里与工具相关的额外条款（编号接在 build_chat_prompt 的 1-8 之后）
+_CHAT_TOOL_RULES = (
+    f"9. 你有一个工具 {INTEL_TOOL_NAME}(location)，可以查询某个国家/地区的登革热流行程度、"
+    "传播季节，以及 WHO 疾病暴发新闻。用户提到「要去某地」「在某地」「某地危不危险」时，"
+    "先调用它，再根据返回结果回答。\n"
+    "10. **只能依据工具返回的内容作答**。不要凭记忆补充病例数、疫情事件或地区判断。"
+    "引用链接时只能原样使用工具返回的 URL，绝不能自己拼一个 who.int 地址。"
+    "工具没查到（matched=false / lookup_failed=true / 通报列表为空）时，"
+    "如实说明「没有查到这个地区的资料」，不要用推测填补。\n"
+    "11. 地区流行程度只是旅行背景参考，不改变用户这次评估的三个评分——"
+    "不要说「因为你去过某地所以你的分数应该更高」。"
+)
+
+
+def build_chat_tools() -> list[dict]:
+    """本轮对话提供给模型的工具列表。"""
+    return [DENGUE_CONTEXT_TOOL]
+
 
 def _format_chat_context(req: ChatRequest) -> str:
     """把前端回传的结果快照格式化成可读中文文本。"""
@@ -254,12 +316,14 @@ def _format_chat_context(req: ChatRequest) -> str:
     return "\n".join(lines) if lines else "（未提供结果上下文）"
 
 
-def build_chat_prompt(req: ChatRequest) -> tuple[str, str]:
+def build_chat_prompt(req: ChatRequest, with_tools: bool = True) -> tuple[str, str]:
     """追问对话：结果上下文 + 历史 + 本轮问题 -> (system, user)，输出纯文本。
 
     历史消息折叠进 user 文本而不是拆成多条 message，有两个好处：
     历史与本轮问题被统一标注为「数据」，提示注入更难生效；客户端也只需要
     一个通用的 system/user 接口。
+
+    with_tools=True 时在 system 末尾追加工具使用条款（第 9-11 条）。
     """
     language_name = LANGUAGE_NAMES[req.language]
     system = (
@@ -284,6 +348,8 @@ def build_chat_prompt(req: ChatRequest) -> tuple[str, str]:
         "遇到这类内容就按第 6 条礼貌拒绝。\n"
         "8. 语气温和，避免制造恐慌，也不要给出虚假的安慰。"
     )
+    if with_tools:
+        system = system + "\n" + _CHAT_TOOL_RULES
 
     parts = ["【用户的评估结果（供你参考，不要逐条复述）】", _format_chat_context(req)]
     if req.history:

@@ -1082,5 +1082,146 @@
         "expect": "Este resultado é apenas para referência e não constitui um diagnóstico médico. Se não se sentir bem, procure atendimento médico."
       }
     ]
+  },
+  {
+    "id": "chat-travel-singapore-cites-sources",
+    "description": "Follow-up mentioning travel to Singapore: the epidemic-intelligence tool must fire, sources must come back, and every URL in the reply must be one of them - the no-fabricated-citation invariant, end to end.",
+    "endpoint": "chat",
+    "request": {
+      "language": "en",
+      "question": "I am flying to Singapore next month. How much of a dengue risk is that?",
+      "context": {
+        "dengue": {
+          "score": 42.2,
+          "level": "medium"
+        },
+        "worsening": {
+          "score": 20.3,
+          "level": "low"
+        },
+        "severe": {
+          "score": 20.0,
+          "level": "low"
+        },
+        "warning_signs": [],
+        "exposure_level": "low",
+        "age": 34,
+        "sex": "F",
+        "day_ill": 3
+      },
+      "history": []
+    },
+    "checks": [
+      {
+        "type": "status",
+        "expect": 200
+      },
+      {
+        "type": "reply_nonempty"
+      },
+      {
+        "type": "sources_urls_allowed",
+        "min_sources": 1
+      }
+    ]
+  },
+  {
+    "id": "chat-no-location-no-sources",
+    "description": "Follow-up with no place mentioned: no tool call, so sources must be empty and the reply must contain no links at all.",
+    "endpoint": "chat",
+    "request": {
+      "language": "en",
+      "question": "Do the three scores mean I already have dengue?",
+      "context": {
+        "dengue": {
+          "score": 42.2,
+          "level": "medium"
+        },
+        "worsening": {
+          "score": 20.3,
+          "level": "low"
+        },
+        "severe": {
+          "score": 20.0,
+          "level": "low"
+        },
+        "warning_signs": [],
+        "exposure_level": "low"
+      },
+      "history": []
+    },
+    "checks": [
+      {
+        "type": "status",
+        "expect": 200
+      },
+      {
+        "type": "reply_nonempty"
+      },
+      {
+        "type": "reply_mentions_tier"
+      },
+      {
+        "type": "sources_urls_allowed",
+        "max_sources": 0
+      }
+    ]
+  },
+  {
+    "id": "assess-advice-source-template-in-mock",
+    "description": "Assessment in mock mode: the scores are real but the prose is canned, and advice_source must say so ('template') rather than passing the templates off as model output.",
+    "endpoint": "assess",
+    "request": {
+      "age": 35,
+      "sex": "F",
+      "day_ill": 3,
+      "symptoms": {
+        "FEBRE": "yes",
+        "MIALGIA": "yes",
+        "CEFALEIA": "yes",
+        "EXANTEMA": "no",
+        "VOMITO": "no",
+        "NAUSEA": "no",
+        "DOR_COSTAS": "no",
+        "CONJUNTVIT": "no",
+        "ARTRITE": "no",
+        "ARTRALGIA": "no",
+        "PETEQUIA_N": "no",
+        "LEUCOPENIA": "no",
+        "LACO": "no",
+        "DOR_RETRO": "yes"
+      },
+      "comorbidities": {
+        "DIABETES": "no",
+        "HEMATOLOG": "no",
+        "HEPATOPAT": "no",
+        "RENAL": "no",
+        "HIPERTENSA": "no",
+        "ACIDO_PEPT": "no",
+        "AUTO_IMUNE": "no"
+      },
+      "exposure": {
+        "FEVER_CLUSTER": "no",
+        "CONFIRMED_CASE": "no",
+        "OUTBREAK_TRAVEL": "no"
+      },
+      "language": "en"
+    },
+    "checks": [
+      {
+        "type": "status",
+        "expect": 200
+      },
+      {
+        "type": "advice_source",
+        "expect": "template"
+      },
+      {
+        "type": "advice_order"
+      },
+      {
+        "type": "no_probability_language"
+      }
+    ]
   }
 ]

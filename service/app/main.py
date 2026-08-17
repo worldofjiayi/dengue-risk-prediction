@@ -42,11 +42,17 @@ app = FastAPI(
 
 @app.post("/api/assess", response_model=AssessmentResult)
 async def assess(form: FormInput) -> AssessmentResult:
-    """接收问卷，返回风险评估结果。"""
+    """接收问卷，返回风险评估结果。
+
+    注意：**上游 LLM 失败不再让这个接口失败**。评分、警示征象、暴露背景、
+    贡献拆解全都在本地算出，建议文本失败时由 pipeline 退回模板并把
+    advice_source 标成 "template"（详见 pipeline 模块说明）。因此下面的 502
+    分支现在是纯防御——真的走到这里，说明流水线里出现了没被兜住的新失败点。
+    """
     try:
         return await run_assessment(form)
     except DeepSeekError as exc:
-        logger.error("上游 DeepSeek 服务错误：%s", exc)
+        logger.error("上游 DeepSeek 服务错误（评估流程未兜住）：%s", exc)
         raise HTTPException(
             status_code=502,
             detail=UPSTREAM_ERRORS.get(form.language, UPSTREAM_ERRORS["zh-CN"]),

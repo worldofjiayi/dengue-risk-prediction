@@ -1,27 +1,40 @@
 """DeepSeek 客户端：OpenAI 兼容的 /chat/completions 调用。
 
 两种调用方式：
-  chat_json —— 强制 response_format=json_object，解析失败会把错误回喂给模型重试；
-               用于「备注症状抽取」与「建议生成」。
-  chat_text —— 普通文本输出，不加 response_format；用于 /api/chat 的追问对话
-               （聊天回复应当是散文，不是 JSON）。
+  chat_json       —— 强制 response_format=json_object，解析失败会把错误回喂给模型重试；
+                     用于「备注症状抽取」与「建议生成」。
+  chat_with_tools —— 纯文本输出（不加 response_format），并带函数调用
+                     （OpenAI tools / tool_calls）：用于 /api/chat。聊天回复应当是
+                     给人读的散文，套一层 JSON 只会让模型把精力花在格式上。
+                     要不要查流行病学情报由模型自己决定，客户端只负责搬运——
+                     真正执行工具的函数由流水线注入（tool_executor）。
 
 MOCK_MODE=true 时不发任何网络请求，直接返回可信假数据，便于本地演示与测试。
 假建议按**风险档位**（low/medium/high）分三套，让演示能看出差异。
+
+这份分档文案还有第二个身份：**兜底模板**。真实模型生成的建议若两次都没通过
+输出校验（app.verifier），流水线就退回 fallback_advice() ——因此这里只有一份
+文案，演示模式与线上兜底共用，不存在两套会各自漂移的文本。
 """
 
 import copy
 import json
 import logging
+from typing import Callable
 
+import anyio
 import httpx
 
 from app.config import get_settings
+from app.intel import INTEL_TOOL_NAME, find_location
 
 logger = logging.getLogger(__name__)
 
 # JSON 解析失败时的最大重试次数（不含首次请求）
 _JSON_RETRIES = 2
+
+# 带工具的对话最多来回几轮（一轮 = 一次模型调用 + 执行它要求的所有工具）
+_DEFAULT_TOOL_ROUNDS = 2
 
 
 class DeepSeekError(Exception):
@@ -294,8 +307,14 @@ def _normalise(language: str, tier: str) -> tuple[str, str]:
     return lang, level
 
 
-def build_mock_advice(language: str, tier: str) -> dict:
-    """按语言与风险档位组装假建议（键顺序与 Advice 模型一致）。"""
+def fallback_advice(language: str, tier: str) -> dict:
+    """按语言与风险档位组装一份**可直接返回给用户**的建议。
+
+    两个调用方共用这一份文案，刻意不复制：
+      - MOCK_MODE 下 chat_json("advice") 的返回值；
+      - 真实模式下模型失败、或连续两次没通过 app.verifier 校验后的兜底。
+    键顺序与 Advice 模型一致（medical → monitoring → protection）。
+    """
     lang, level = _normalise(language, tier)
     return {
         "summary": _MOCK_SUMMARY[lang][level],
@@ -307,24 +326,189 @@ def build_mock_advice(language: str, tier: str) -> dict:
     }
 
 
+# 旧名保留：演示模式下它就是兜底模板，同一个函数
+build_mock_advice = fallback_advice
+
+
 def build_mock_chat_reply(language: str, tier: str) -> str:
     """按语言与风险档位组装假聊天回复（引用用户自己的风险等级）。"""
     lang, level = _normalise(language, tier)
     return _MOCK_CHAT_TEMPLATES[lang].format(tier=_MOCK_CHAT_TIER_LABELS[lang][level])
 
 
-class DeepSeekClient:
-    """DeepSeek 聊天补全客户端：chat_json 走 JSON 模式，chat_text 走纯文本。"""
+# ---- MOCK 的「带工具」回复：真的走一遍工具，再引用它真的返回的那条链接 ----
 
-    async def _request(
+_MOCK_ENDEMICITY_LABELS: dict[str, dict[str, str]] = {
+    "zh-CN": {
+        "high": "登革热高度流行地区", "moderate": "存在局部传播的地区",
+        "low": "偶有本地传播的低风险地区", "none": "目前没有本地传播的地区",
+        "unknown": "资料表中没有收录的地区",
+    },
+    "zh-TW": {
+        "high": "登革熱高度流行地區", "moderate": "存在局部傳播的地區",
+        "low": "偶有本地傳播的低風險地區", "none": "目前沒有本地傳播的地區",
+        "unknown": "資料表中沒有收錄的地區",
+    },
+    "en": {
+        "high": "a highly endemic area for dengue", "moderate": "an area with limited local transmission",
+        "low": "a low-risk area with only occasional local transmission",
+        "none": "an area with no established local transmission",
+        "unknown": "an area this reference table does not cover",
+    },
+    "es": {
+        "high": "una zona de alta endemicidad de dengue", "moderate": "una zona con transmisión local limitada",
+        "low": "una zona de bajo riesgo con transmisión local ocasional",
+        "none": "una zona sin transmisión local establecida",
+        "unknown": "una zona que esta tabla de referencia no cubre",
+    },
+    "pt": {
+        "high": "uma área de alta endemicidade de dengue", "moderate": "uma área com transmissão local limitada",
+        "low": "uma área de baixo risco, com transmissão local ocasional",
+        "none": "uma área sem transmissão local estabelecida",
+        "unknown": "uma área que esta tabela de referência não cobre",
+    },
+}
+
+_MOCK_TOOL_TEMPLATES: dict[str, str] = {
+    "zh-CN": (
+        "（演示模式回复，未调用真实模型）我查了内置的地区背景表与 WHO 疾病暴发新闻："
+        "{location} 属于{label}。{season}\n"
+        "出行或居住期间请做好防蚊防护：使用驱蚊剂与蚊帐、清除住所周边积水；"
+        "白天同样要防蚊。若出现发热、头痛、眼后痛等症状，请尽快就医并主动告知旅行史。{cite}"
+    ),
+    "zh-TW": (
+        "（示範模式回覆，未呼叫真實模型）我查了內建的地區背景表與 WHO 疾病暴發新聞："
+        "{location} 屬於{label}。{season}\n"
+        "出行或居住期間請做好防蚊防護：使用防蚊液與蚊帳、清除住所周邊積水；"
+        "白天同樣要防蚊。若出現發燒、頭痛、眼後痛等症狀，請儘快就醫並主動告知旅遊史。{cite}"
+    ),
+    "en": (
+        "(Demo-mode reply — no live model was called.) I checked the built-in country table and the "
+        "WHO Disease Outbreak News: {location} is {label}. {season}\n"
+        "While you are there, keep up mosquito protection — repellent, bed nets, and clearing standing "
+        "water around where you stay — and remember the Aedes mosquito bites during the day. If you "
+        "develop fever, headache or pain behind the eyes, seek medical care promptly and mention your "
+        "travel history.{cite}"
+    ),
+    "es": (
+        "(Respuesta en modo demostración: no se llamó a ningún modelo real.) Consulté la tabla interna "
+        "de países y las noticias de brotes de la OMS: {location} es {label}. {season}\n"
+        "Mientras esté allí, mantenga la protección contra mosquitos —repelente, mosquiteros y "
+        "eliminación de agua estancada— y recuerde que el mosquito Aedes pica de día. Si aparece "
+        "fiebre, dolor de cabeza o dolor detrás de los ojos, busque atención médica lo antes posible "
+        "e informe de su viaje.{cite}"
+    ),
+    "pt": (
+        "(Resposta em modo de demonstração — nenhum modelo real foi chamado.) Consultei a tabela "
+        "interna de países e as notícias de surtos da OMS: {location} é {label}. {season}\n"
+        "Enquanto estiver lá, mantenha a proteção contra mosquitos — repelente, mosquiteiro e remoção "
+        "de água parada — e lembre-se de que o Aedes pica durante o dia. Se surgirem febre, dor de "
+        "cabeça ou dor atrás dos olhos, procure atendimento médico o quanto antes e informe sua viagem.{cite}"
+    ),
+}
+
+# 没有任何来源时的说明句：**明说查不到**，而不是悄悄不提
+_MOCK_NO_SOURCE: dict[str, str] = {
+    "zh-CN": "\n本次没有取到可引用的 WHO 通报，因此不提供链接。",
+    "zh-TW": "\n本次未取得可引用的 WHO 通報，因此不提供連結。",
+    "en": "\nNo citable WHO notice came back this time, so no link is given.",
+    "es": "\nEsta vez no se obtuvo ningún aviso citable de la OMS, así que no se incluye enlace.",
+    "pt": "\nDesta vez não foi obtido nenhum aviso citável da OMS, portanto nenhum link é fornecido.",
+}
+
+_MOCK_CITE: dict[str, str] = {
+    "zh-CN": "\n参考来源（WHO 疾病暴发新闻）：{title}（{date}）{url}",
+    "zh-TW": "\n參考來源（WHO 疾病暴發新聞）：{title}（{date}）{url}",
+    "en": "\nSource (WHO Disease Outbreak News): {title} ({date}) {url}",
+    "es": "\nFuente (Noticias sobre brotes de enfermedades, OMS): {title} ({date}) {url}",
+    "pt": "\nFonte (Notícias sobre surtos de doenças, OMS): {title} ({date}) {url}",
+}
+
+
+def build_mock_tool_reply(language: str, result: dict) -> str:
+    """用**工具真正返回的数据**拼一条演示回复，引用的链接必然来自 result。"""
+    lang = language if language in _MOCK_TOOL_TEMPLATES else _DEFAULT_LANG
+    endemicity = str(result.get("endemicity") or "unknown")
+    labels = _MOCK_ENDEMICITY_LABELS[lang]
+    season = result.get("season_note") or ""
+    notices = result.get("who_notices") or []
+    if notices:
+        cite = _MOCK_CITE[lang].format(**notices[0])
+    else:
+        cite = _MOCK_NO_SOURCE[lang]
+    return _MOCK_TOOL_TEMPLATES[lang].format(
+        location=result.get("location", "?"),
+        label=labels.get(endemicity, labels["unknown"]),
+        season=season,
+        cite=cite,
+    )
+
+
+# ---------- 函数调用（tools）辅助 ----------
+
+# 轮数用尽时追加的指令：用手上已有的工具结果作答，不许再编
+_FINAL_ANSWER_INSTRUCTION = (
+    "You have used all the tool calls available for this turn. Answer the user now, "
+    "using only the tool results already shown above and the assessment context. "
+    "Cite only URLs that appear in those tool results. If they do not contain what the "
+    "user asked for, say so plainly instead of guessing."
+)
+
+
+def _tool_call_name(call: dict) -> str:
+    function = call.get("function") if isinstance(call, dict) else None
+    if isinstance(function, dict):
+        return str(function.get("name") or "")
+    return ""
+
+
+def _tool_call_args(call: dict) -> dict:
+    """解析 tool_call 的参数字符串；模型给了非法 JSON 也不能把整轮请求炸掉。"""
+    function = call.get("function") if isinstance(call, dict) else None
+    raw = function.get("arguments") if isinstance(function, dict) else None
+    if isinstance(raw, dict):
+        return raw
+    try:
+        parsed = json.loads(raw or "{}")
+    except (json.JSONDecodeError, TypeError):
+        logger.warning("工具调用参数不是合法 JSON，按空参数处理：%r", raw)
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+async def _run_tool(
+    tool_executor: Callable[[str, dict], dict], name: str, args: dict
+) -> dict:
+    """在线程里执行注入的工具函数；失败转成结构化错误，喂回给模型。"""
+
+    def _call() -> dict:
+        return tool_executor(name, args)
+
+    try:
+        result = await anyio.to_thread.run_sync(_call)
+    except Exception as exc:  # 工具自身崩溃不该让整轮对话 502
+        logger.warning("工具 %s 执行失败：%s", name, exc, exc_info=True)
+        return {"error": f"tool '{name}' failed: {exc}", "lookup_failed": True}
+    return result if isinstance(result, dict) else {"result": result}
+
+
+class DeepSeekClient:
+    """DeepSeek 聊天补全客户端：chat_json 走 JSON 模式，chat_with_tools 走纯文本 + 工具。"""
+
+    async def _request_message(
         self,
         client: httpx.AsyncClient,
         messages: list[dict],
         purpose: str,
         json_mode: bool,
         temperature: float,
-    ) -> str:
-        """发一次请求并取出 message.content；网络/结构异常统一转成 DeepSeekError。"""
+        tools: list[dict] | None = None,
+    ) -> dict:
+        """发一次请求并取出整个 choices[0].message。
+
+        取整条 message 而不是只取 content：函数调用时 content 为 null，真正的
+        载荷在 tool_calls 里。网络/结构异常统一转成 DeepSeekError。
+        """
         settings = get_settings()
         url = settings.deepseek_base_url.rstrip("/") + "/chat/completions"
         headers = {
@@ -338,6 +522,9 @@ class DeepSeekClient:
         }
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
 
         try:
             resp = await client.post(url, json=payload, headers=headers)
@@ -352,11 +539,33 @@ class DeepSeekClient:
             ) from exc
 
         try:
-            return resp.json()["choices"][0]["message"]["content"]
+            message = resp.json()["choices"][0]["message"]
         except (KeyError, IndexError, TypeError, ValueError) as exc:
             raise DeepSeekError(
-                f"DeepSeek 返回结构异常，缺少 choices/message/content（purpose={purpose}）"
+                f"DeepSeek 返回结构异常，缺少 choices/message（purpose={purpose}）"
             ) from exc
+        if not isinstance(message, dict):
+            raise DeepSeekError(f"DeepSeek 返回的 message 不是对象（purpose={purpose}）")
+        return message
+
+    async def _request(
+        self,
+        client: httpx.AsyncClient,
+        messages: list[dict],
+        purpose: str,
+        json_mode: bool,
+        temperature: float,
+    ) -> str:
+        """发一次请求并取出 message.content（不带工具的普通调用）。"""
+        message = await self._request_message(
+            client, messages, purpose, json_mode, temperature
+        )
+        content = message.get("content")
+        if content is None:
+            raise DeepSeekError(
+                f"DeepSeek 返回结构异常，缺少 choices/message/content（purpose={purpose}）"
+            )
+        return content
 
     async def chat_json(
         self,
@@ -426,41 +635,118 @@ class DeepSeekClient:
             f"DeepSeek 连续 {1 + _JSON_RETRIES} 次未能返回合法 JSON（purpose={purpose}）"
         )
 
-    async def chat_text(
+
+    async def chat_with_tools(
         self,
         system: str,
-        user: str,
-        purpose: str = "chat",
+        messages: list[dict],
+        tools: list[dict],
+        tool_executor: Callable[[str, dict], dict],
         language: str = "zh-CN",
         tier: str = "low",
-    ) -> str:
-        """调用 DeepSeek 并返回纯文本回复（不加 response_format）。
+        max_rounds: int = _DEFAULT_TOOL_ROUNDS,
+        purpose: str = "chat",
+        mock_probe: str = "",
+    ) -> dict:
+        """带函数调用的对话。返回 {"reply": str, "tool_results": [...]}。
 
-        用于 /api/chat：聊天回复应当是给人读的散文，套一层 JSON 只会让模型
-        把精力花在格式上，也让空白与换行更难保留。没有 JSON 就没有解析失败，
-        因此这里不重试。
+        tool_executor(name, args) -> dict 由流水线注入：客户端只负责搬运
+        tool_calls 与 tool 消息，不知道也不关心工具到底查了什么。工具是同步函数，
+        放到线程里跑，避免一次 8 秒的外部请求把事件循环钉住。
+
+        max_rounds 是**模型调用**的轮数上限。轮数用尽时不再给它 tools，而是把
+        已经拿到的工具结果留在上下文里、追加一句「现在就回答」——宁可拿一个
+        基于已有数据的答案，也不要无限循环下去。
+
+        tool_results 里每项是 {"name", "arguments", "result"}，流水线据此算出
+        本轮允许引用的链接白名单（见 verifier.verify_chat_reply）。
+
+        mock_probe 只在 MOCK 模式下使用：本轮问题与最近历史的原文，用来判断
+        该不该模拟一次工具调用。真实模式完全忽略它——是否调用工具由模型决定。
         """
         settings = get_settings()
 
         if settings.mock_mode:
-            logger.info(
-                "MOCK_MODE 开启，返回 %s 假回复（language=%s, tier=%s）",
-                purpose,
-                language,
-                tier,
+            return await self._mock_tool_conversation(
+                mock_probe, tool_executor, language, tier
             )
-            return build_mock_chat_reply(language, tier)
 
-        messages = [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ]
+        convo: list[dict] = [{"role": "system", "content": system}]
+        convo += [dict(m) for m in messages]
+        tool_results: list[dict] = []
+
         async with httpx.AsyncClient(timeout=settings.deepseek_timeout) as client:
+            for round_index in range(max(1, max_rounds)):
+                message = await self._request_message(
+                    client, convo, purpose, json_mode=False, temperature=0.4, tools=tools
+                )
+                calls = message.get("tool_calls") or []
+                if not calls:
+                    return {
+                        "reply": (message.get("content") or "").strip(),
+                        "tool_results": tool_results,
+                    }
+
+                logger.info(
+                    "第 %d 轮：模型请求调用 %d 个工具（%s）",
+                    round_index + 1,
+                    len(calls),
+                    ", ".join(_tool_call_name(c) for c in calls),
+                )
+                convo.append(
+                    {
+                        "role": "assistant",
+                        "content": message.get("content") or "",
+                        "tool_calls": calls,
+                    }
+                )
+                for call in calls:
+                    name = _tool_call_name(call)
+                    args = _tool_call_args(call)
+                    result = await _run_tool(tool_executor, name, args)
+                    tool_results.append(
+                        {"name": name, "arguments": args, "result": result}
+                    )
+                    convo.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": str(call.get("id") or ""),
+                            "content": json.dumps(result, ensure_ascii=False),
+                        }
+                    )
+
+            # 轮数用尽：把已有结果摆上桌，要求立刻作答（这一次不再给 tools）
+            convo.append({"role": "user", "content": _FINAL_ANSWER_INSTRUCTION})
             content = await self._request(
-                client, messages, purpose, json_mode=False, temperature=0.4
+                client, convo, purpose, json_mode=False, temperature=0.4
             )
 
-        text = (content or "").strip()
-        if not text:
-            raise DeepSeekError(f"DeepSeek 返回了空回复（purpose={purpose}）")
-        return text
+        return {"reply": (content or "").strip(), "tool_results": tool_results}
+
+    async def _mock_tool_conversation(
+        self,
+        probe: str,
+        tool_executor: Callable[[str, dict], dict],
+        language: str,
+        tier: str,
+    ) -> dict:
+        """MOCK 模式：问题里提到已知地名就模拟一轮工具调用，否则走原来的假回复。
+
+        关键是**真的调用一次 tool_executor**：演示回复里的链接因此确实来自
+        工具结果，而不是写死在模板里——这样 MOCK 也能验证「不许编造链接」这条
+        不变量，而不是绕过它。
+        """
+        location = find_location(probe or "")
+        if location is None:
+            logger.info("MOCK_MODE 开启，问题未提到已知地区，返回通用假回复")
+            return {"reply": build_mock_chat_reply(language, tier), "tool_results": []}
+
+        logger.info("MOCK_MODE 开启，模拟一轮工具调用：location=%s", location)
+        args = {"location": location}
+        result = await _run_tool(tool_executor, INTEL_TOOL_NAME, args)
+        return {
+            "reply": build_mock_tool_reply(language, result),
+            "tool_results": [
+                {"name": INTEL_TOOL_NAME, "arguments": args, "result": result}
+            ],
+        }

@@ -77,6 +77,8 @@ Guidelines:
 | `reply_nonempty` | — | Chat only: `reply` is a non-empty string. |
 | `reply_mentions_tier` | — | Chat only: the reply references the overall tier computed from the request's context (highest of the three levels), using the per-language tier labels in `eval_run.py`. |
 | `scores_match_scenario` | `ref` | The runner executes the scenario with id `ref` and all three `z` values match exactly. Used to prove that exposure answers and unknown-vs-no answers never move the model scores. |
+| `sources_urls_allowed` | `min_sources`, `max_sources` (both optional) | Chat only: every URL appearing in `reply` is present in `sources`, and the source count falls within the given bounds. This is the harness-side guard on the no-fabricated-citation invariant — the app enforces it too, in `app/verifier.py`, and the two checks are written independently. |
+| `advice_source` | `expect` | `body["advice_source"]` equals `expect` (`llm` or `template`). Distinguishes advice the model produced and that passed verification from the template fallback used when generation fails or keeps violating the rules. |
 
 The lexicons and tier labels are deliberately **duplicated** in `eval_run.py`
 rather than imported from `app/` — the harness pins expected behavior, so if

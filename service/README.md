@@ -23,10 +23,20 @@ flowchart LR
     E --> X[Contribution breakdown<br>top-5 per model]
     E --> F[LLM call #2<br>advice in user's language]
     R --> F
-    F --> B
+    F --> V{{"Output verifier<br>app.verifier"}}
+    V -->|clean| B
+    V -->|"violations: re-ask once"| F
+    V -.->|twice failed, or upstream error| T["Template advice<br>advice_source = template"]
+    T --> B
     X --> B
-    B -->|AssessmentResult| G[Dual gauges + banners + advice]
-    G -->|POST /api/chat| H[Follow-up Q&A<br>stateless, plain text]
+    B -->|AssessmentResult| G["Dual gauges + banners + advice"]
+    G -->|POST /api/chat| H["Follow-up Q&A<br>tools enabled"]
+    H <-->|tool_calls| I["lookup_dengue_context<br>app.intel"]
+    I --> J[("dengue_endemicity.json<br>WHO + CDC, 2026")]
+    I --> K["WHO Disease Outbreak News<br>live, cached 12h"]
+    H --> W{{"Output verifier<br>allowed URLs = this turn's sources"}}
+    W -->|clean| G
+    W -.->|twice failed| Y["Localised fallback reply"]
 ```
 
 Feature encoding is **deterministic and authoritative**. The first LLM call has one narrow job:
@@ -38,11 +48,17 @@ Two things run **beside** the model rather than inside it — the WHO warning-si
 epidemiological exposure tier. Both are plain rules over the questionnaire, and both are described
 below.
 
+Two more layers wrap the LLM calls themselves: a rule-based
+[output verifier](#output-verification) that every generated string must pass before it reaches a
+user, and an [epidemic-intelligence tool](#epidemic-intelligence) the chat model can call on its
+own initiative.
+
 - Entry point: `app.main:app` — port `80` in production, `8000` for local development
 - Static frontend served directly by FastAPI (`GET /` returns `static/index.html`)
 - Health: `GET /api/health` → `{"status":"ok","mock_mode":bool,"models":["A","B","B2"]}`
-- Validation errors return 422; upstream/server errors return 502/500 with `{"detail": "..."}`
-  (localised to the request's `language`)
+- Validation errors return 422; server errors return 500 with `{"detail": "..."}` (localised to the
+  request's `language`). `/api/chat` returns 502 when the upstream model is unreachable;
+  **`/api/assess` no longer does** — see [Output verification](#output-verification)
 
 ---
 
@@ -275,6 +291,144 @@ of the 0–100 score (see [Scoring](#scoring)).
 
 ---
 
+## Output verification
+
+Everything above this line is deterministic and checkable. The generated prose is not — so it gets
+checked on the way out. [`app/verifier.py`](app/verifier.py) is a **pure rule engine**: no model, no
+network, no I/O. It does not judge whether advice is *good*; it judges whether it crossed a line
+this service is not allowed to cross, and each of those lines is expressible as a rule.
+
+| Code | Rule | Deliberately *not* a violation |
+|---|---|---|
+| `dosage` | A number adjacent to a dose unit (`mg`, `ml`, `mcg`, `g`, `片`, `粒`, `毫克`, `毫升`, `comprimido`, `tableta`, `tablet`) or a dosing interval (`每 N 小时`, `cada N horas`, `a cada N horas`, `every N hours`) | "avoid aspirin or ibuprofen" — a safety warning with no number is not a prescription. Unit-tested in all five languages |
+| `probability` | A `%` figure, probability wording, **and** a second-person reference, all in the same sentence | "90% of dengue cases are mild" — a population statistic, tested in both directions per language |
+| `urgency_missing` | `overall_tier == "high"` or any warning sign present, yet no `medical` item matches the language's seek-care lexicon | Low tier with no warning signs — advice may legitimately give a threshold instead |
+| `language_mismatch` | zh-CN/zh-TW below 30% CJK characters; en/es/pt above 5% CJK **or** carrying fewer than two of the language's function words | Loanwords and place names — the thresholds are deliberately loose |
+| `structure` | Any of `medical` / `monitoring` / `protection` outside 1–5 non-blank items, or an item over 400 characters | — |
+| `fabricated_url` | *(chat only)* A link that does not prefix-match one returned by this turn's tools | A reply with no links at all |
+| `empty` | *(chat only)* A blank reply | — |
+
+Each violation carries a developer-facing `message` written in the second person, because that
+message is fed straight back to the model.
+
+**Retry, then fall back.** On the advice path: generate → verify → if anything fires, re-ask once
+with the violation messages appended ("Your previous answer violated: … Regenerate the same JSON,
+fixing only these issues") → verify again → if it still fails, serve the built-in template for that
+language and tier. `/api/chat` gets the same single retry, then falls back to a localised
+"I can't produce a reliable answer right now — please consult a local health service."
+
+There is exactly **one** copy of the fallback text: `fallback_advice(language, tier)` in
+`deepseek_client.py`, the same function that powers mock mode. Demo prose and production fallback
+cannot drift apart because they are the same strings. Mock mode runs the verifier too — it is free —
+and a test asserts **every template × 5 languages × 3 tiers × with/without warning signs yields zero
+violations**. That test is what makes the fallback path trustworthy; a dirty template would mean the
+safety net is itself unsafe.
+
+The urgency lexicon exists twice on purpose: once in `verifier.py`, once in `scripts/eval_run.py`.
+Neither imports the other. If someone rewords the advice templates, one side goes red.
+
+### `advice_source`, and the deliberate 502 → 200 change
+
+`AssessmentResult` gained `advice_source: "llm" | "template"`. Mock mode and every fallback report
+`"template"`; only verified live output reports `"llm"`.
+
+**An advice-stage `DeepSeekError` no longer fails the assessment.** It used to return 502. It now
+returns **200 with template advice and `advice_source: "template"`.**
+
+The reasoning: the scores, the WHO warning-sign check, the exposure tier and the contribution
+breakdown are all computed locally and are the part of this service with actual evidence behind
+them. Throwing all of that away because one paragraph of natural language was unavailable is a bad
+trade — especially for a user who has just answered twenty-one questions about their symptoms. The
+response stays honest about what happened via `advice_source`.
+
+`/api/chat` keeps its 502: there the reply *is* the entire output, and there is nothing to fall
+back to but a localised apology.
+
+---
+
+## Epidemic intelligence
+
+The chat model can call one tool, on its own initiative:
+`lookup_dengue_context(location)` — [`app/intel.py`](app/intel.py).
+
+```json
+{
+  "location": "Singapore",
+  "matched": true,
+  "endemicity": "high",
+  "season_note": "Year-round; warmer months of June to October usually see the highest counts.",
+  "who_notices": [
+    { "title": "Dengue - Global situation", "date": "2024-05-30",
+      "url": "https://www.who.int/emergencies/disease-outbreak-news/item/2024-DON518" }
+  ],
+  "lookup_failed": false
+}
+```
+
+**Provenance.** Two sources, both named in the payload's own data file:
+
+- [`app/data/dengue_endemicity.json`](app/data/dengue_endemicity.json) — 81 countries and
+  territories tiered `high` / `moderate` / `low` / `none`, each with a short English season note,
+  compiled from the **WHO dengue and severe dengue fact sheet** and the **CDC dengue risk map**
+  (2026, recorded in the file's `_sources` block). Sub-national reality that a country tier would
+  misrepresent lives in the note: China is `moderate` "confined to the south — Guangdong, Yunnan,
+  Fujian, Guangxi and Hainan", the United States is `moderate` "south Florida, the Texas Gulf coast
+  and Hawaii", Australia is `moderate` "far north Queensland only". A separate `Northern China`
+  entry is `none`. An alias map (~360 keys) resolves English, zh-CN, zh-TW, Spanish and Portuguese
+  spellings plus common variants — `USA`, `美国`, `Estados Unidos`, `u.s.` all reach `United States`.
+  **This table never touches a score.** It is travel context, reported next to the model output the
+  same way the exposure tier is.
+- **WHO Disease Outbreak News**, live, via the public OData endpoint
+  `GET https://www.who.int/api/news/diseaseoutbreaknews?$filter=contains(Title,'Dengue')&$orderby=PublicationDateAndTime desc`
+  (httpx, 8 s timeout, no key). Items whose `Title` contains the canonical country name are kept,
+  newest first, capped at three. If none match, the newest **global** notices are returned
+  unchanged — their titles literally read "Global situation", so they describe their own scope and
+  cannot be mistaken for a country-specific alert. Each URL is built as
+  `https://www.who.int/emergencies/disease-outbreak-news/item/{UrlName}`; nothing is hand-assembled.
+
+**The no-fabricated-URL invariant.** This is the load-bearing part. `ChatResponse.sources` holds
+exactly what this turn's tool calls returned, and those URLs are the *only* ones the reply may
+contain: `verify_chat_reply(reply, language, allowed_urls=<this turn's source URLs>)`. An empty
+`allowed_urls` means no tool returned anything, so **any** link is a violation. Fail twice and the
+turn is replaced with the localised fallback and empty `sources`. The tool description tells the
+model the same thing in words — cite only what came back, never reconstruct a who.int link — but
+the verifier is what enforces it, and the eval harness re-checks it end to end with its own,
+separately written URL regex.
+
+**Caching.** The WHO list is cached in-process for 12 hours (module-level timestamped cache,
+injectable so tests drive it directly). DONs are published rarely; hitting who.int on every chat
+turn would be both slow and rude. A *failed* fetch is never cached — the next turn tries again.
+
+**Honest failure.** Network error, HTTP error, or a malformed payload all produce
+`lookup_failed: true` with `who_notices: []`. There is no "best guess" branch anywhere in this
+module. The local endemicity table still answers, because it is on disk — so a user asking about
+Brazil during a WHO outage still learns Brazil is highly endemic, and simply gets no citation.
+
+**Mock mode** makes no network call and serves a canned list of *real* DON entries through the
+*same* selection logic, so the payload shape is byte-identical to production. Singapore, Brazil,
+Thailand and their zh aliases are the demo path; an unrecognised place returns `matched: false`.
+The mock is the environment, not a different contract.
+
+### Function calling
+
+`DeepSeekClient.chat_with_tools(system, messages, tools, tool_executor, …)` runs the OpenAI
+`tools` / `tool_calls` loop and stays purely transport: it never imports the intel module's logic.
+The pipeline injects `tool_executor(name, args) -> dict`, which is where argument cleaning, the
+actual lookup, and result collection live. On `tool_calls` the client executes each call in a worker
+thread (an 8-second HTTP call must not block the event loop), appends `role: "tool"` messages, and
+continues. After `max_rounds` (default 2) it sends one final turn **without** tools and with an
+explicit "answer now, using only the tool results above" instruction, rather than looping forever.
+Malformed `arguments` JSON becomes `{}` and a crashing tool becomes `{"error": …,
+"lookup_failed": true}` — the model is told what went wrong instead of the request dying.
+
+In mock mode, if the question or recent history names a known location, the client simulates one
+tool round by **actually invoking the injected executor** and citing a URL that genuinely came back
+from it. That matters: the mock exercises the no-fabricated-URL invariant rather than side-stepping
+it. Only the user's own text is scanned for place names — not the rendered prompt, which contains
+language names like "葡萄牙语" that would otherwise be read as Portugal.
+
+---
+
 ## API
 
 ### `POST /api/assess`
@@ -315,7 +469,8 @@ The whole `exposure` object may be omitted, which yields `{"level": "low", "fact
     "severe":    [{ "feature": "CEFALEIA_x", "code": "CEFALEIA", "contribution": -0.725, "direction": "down" }]
   },
   "disclaimer": "...",
-  "model_note": "Scores are relative risk indicators, not infection probabilities. ..."
+  "model_note": "Scores are relative risk indicators, not infection probabilities. ...",
+  "advice_source": "llm"
 }
 ```
 
@@ -330,6 +485,10 @@ The advice content also varies by **overall tier** — the highest of the three 
 at `high` its first line says to seek care promptly. In mock mode this is real: `medical` and
 `summary` have three written variants per language, while `protection` and `monitoring` stay
 constant.
+
+`advice_source` is `"llm"` only when a live model produced the text **and** it passed the output
+verifier. Mock mode, verifier fallback and upstream failure all report `"template"`. An advice
+failure returns 200, not 502 — see [Output verification](#output-verification).
 
 ### `POST /api/chat`
 
@@ -358,7 +517,14 @@ frontend replays the context and recent history on every turn.
 ```
 
 ```json
-{ "reply": "..." }
+{
+  "reply": "...",
+  "sources": [
+    { "title": "Dengue - Global situation",
+      "date": "2024-05-30",
+      "url": "https://www.who.int/emergencies/disease-outbreak-news/item/2024-DON518" }
+  ]
+}
 ```
 
 - `question` is 1–500 characters; blank or longer returns 422.
@@ -370,11 +536,17 @@ frontend replays the context and recent history on every turn.
   prescriptions and drug dosages, forbids stating any probability of infection, requires
   recommending a clinician when the user reports worsening or warning signs, redirects off-topic
   questions, and marks the user's text as data so embedded instructions are not followed.
-- Replies are plain prose. `DeepSeekClient.chat_text` omits `response_format`, unlike `chat_json`
-  which the two assessment calls still use.
-- In mock mode the reply is canned per language and quotes the user's own risk tier — no network
-  call.
+- `sources` is what this turn's tool calls actually returned and is therefore citable — `[]` when
+  no tool ran or nothing was found, in which case the reply must contain no links at all. It is
+  both the citation list and the verifier's allow-list. See
+  [Epidemic intelligence](#epidemic-intelligence).
+- Replies are plain prose. `DeepSeekClient.chat_with_tools` omits `response_format`, unlike
+  `chat_json` which the two assessment calls still use.
+- In mock mode a question naming a known place runs the tool and cites what came back; otherwise
+  the reply is canned per language and quotes the user's own risk tier. Either way, no network call.
 - Errors: `DeepSeekError` → 502, unexpected → 500, both with a `detail` localised to `language`.
+  A reply that fails verification twice returns **200** with the localised fallback text and empty
+  `sources` — the model failed, not the request.
 
 ### `POST /api/plan`
 
@@ -409,10 +581,13 @@ Open <http://localhost:8000>.
 
 **In mock mode the risk scores are real** — computed by the actual model from your answers, and so
 are the exposure tier and the contribution breakdown. Only the natural-language advice and chat
-replies are canned (localised per language, and varied by risk tier). No API key required.
+replies are canned (localised per language, and varied by risk tier), and `advice_source` says so.
+The output verifier and the epidemic-intelligence tool both run for real, the latter against its
+canned WHO list rather than the network. No API key required.
 
 ```bash
-pytest tests          # 128 tests
+pytest tests                    # 331 tests
+python scripts/eval_run.py      # 21 scenarios
 ```
 
 ---
@@ -429,8 +604,15 @@ MOCK_MODE=false
 The client speaks the OpenAI-compatible `/chat/completions` format, so any compatible provider
 works by changing `DEEPSEEK_BASE_URL` and `DEEPSEEK_MODEL`. The two assessment calls request
 `response_format: json_object` and feed parse failures back to the model for up to two retries;
-`/api/chat` uses the same endpoint without `response_format`, since a chat reply should be prose.
-Restart the service after editing `.env` (`sudo systemctl restart jiayi`).
+`/api/chat` uses the same endpoint without `response_format`, since a chat reply should be prose,
+and adds `tools` / `tool_choice: auto` for the epidemic-intelligence function. A provider that
+ignores `tools` degrades gracefully: no tool call, no sources, and the verifier then forbids links
+outright. Restart the service after editing `.env` (`sudo systemctl restart jiayi`).
+
+Going live also switches on the retry-then-fallback path: watch the logs for
+`未通过输出校验` (a violation was caught) and `建议退回模板文案` (both attempts failed). A steady
+stream of either means the prompt and the verifier disagree about something, and the prompt is
+usually the one to fix.
 
 ---
 
@@ -581,15 +763,21 @@ service/
 │   ├── schemas.py          FormInput / MLFeatures / AssessmentResult / Chat* / Plan*, FEATS, localised strings
 │   ├── ml_model.py         coefficient loading, feature encoding, scoring, contribution breakdown
 │   ├── planner.py          adaptive questioning: score bounds, provable stop rule, next-question ranking
-│   ├── pipeline.py         orchestration: encode → rules → score → advise → assemble; chat
-│   ├── prompt_builder.py   the LLM prompts (features, advice, chat)
-│   ├── deepseek_client.py  OpenAI-compatible client, JSON + plain-text calls, tiered mock data
+│   ├── pipeline.py         orchestration: encode → rules → score → advise → verify → assemble; chat
+│   ├── prompt_builder.py   the LLM prompts (features, advice, chat) + the tool schema
+│   ├── deepseek_client.py  OpenAI-compatible client: JSON, plain-text and tool-calling loop; shared fallback text
+│   ├── verifier.py         rule engine over generated text: dosage / probability / urgency / language / structure / URLs
+│   ├── intel.py            lookup_dengue_context: endemicity table + live WHO outbreak news, 12h cache
 │   ├── eval_log.py         de-identified evaluation logging
 │   ├── config.py           .env settings
+│   ├── data/
+│   │   └── dengue_endemicity.json  81 countries/territories + alias map (WHO + CDC, 2026)
 │   └── model/
 │       └── dengue_models.json    fitted coefficients (mirror of ../model/results/)
 ├── static/                 hand-written frontend, zero external dependencies
-├── tests/                  128 pytest tests
+├── tests/                  331 pytest tests
+├── eval/scenarios.json     21 declarative regression scenarios
+├── scripts/eval_run.py     scenario runner (regression gate + failure library)
 ├── scripts/eval_stats.py   evaluation log statistics
 ├── deploy/                 systemd unit + manual launch script
 ├── .env.example

@@ -906,13 +906,14 @@ def test_chat_rejects_bad_language_and_role(client):
 
 
 def test_chat_upstream_error_returns_localized_502(client, monkeypatch):
+    """追问对话没有可退的东西——回复本身就是全部产出，所以仍然 502。"""
     from app.deepseek_client import DeepSeekClient, DeepSeekError
     from app.schemas import UPSTREAM_ERRORS
 
     async def boom(*args, **kwargs):
         raise DeepSeekError("上游炸了")
 
-    monkeypatch.setattr(DeepSeekClient, "chat_text", boom)
+    monkeypatch.setattr(DeepSeekClient, "chat_with_tools", boom)
     resp = client.post("/api/chat", json=chat_body(language="es"))
     assert resp.status_code == 502
     assert resp.json()["detail"] == UPSTREAM_ERRORS["es"]
@@ -925,7 +926,7 @@ def test_chat_unexpected_error_returns_localized_500(client, monkeypatch):
     async def boom(*args, **kwargs):
         raise RuntimeError("意外错误")
 
-    monkeypatch.setattr(DeepSeekClient, "chat_text", boom)
+    monkeypatch.setattr(DeepSeekClient, "chat_with_tools", boom)
     resp = client.post("/api/chat", json=chat_body(language="en"))
     assert resp.status_code == 500
     assert resp.json()["detail"] == SERVER_ERRORS["en"]

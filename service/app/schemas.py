@@ -81,6 +81,8 @@ Sex = Literal["F", "M"]
 RiskLevel = Literal["low", "medium", "high"]
 Language = Literal["zh-CN", "zh-TW", "en", "es", "pt"]
 ModelKey = Literal["A", "B", "B2"]
+# 建议文本的来源：真实模型输出（已通过输出校验）还是内置模板兜底
+AdviceSource = Literal["llm", "template"]
 
 # ---------- 五语言固定文案 ----------
 
@@ -333,6 +335,14 @@ class AssessmentResult(BaseModel):
     )
     disclaimer: str = DISCLAIMER
     model_note: str = MODEL_NOTES["zh-CN"]
+    advice_source: AdviceSource = Field(
+        default="template",
+        description=(
+            "这段建议是谁写的：llm = 真实模型生成且通过了输出校验；"
+            "template = 内置模板（演示模式，或模型失败/两次都没通过校验后的兜底）。"
+            "评分与规则判断在两种情况下都是真实计算的，只有自然语言部分不同。"
+        ),
+    )
 
 
 # ---------- 追问对话（POST /api/chat） ----------
@@ -409,10 +419,25 @@ class ChatRequest(BaseModel):
         return value[-CHAT_HISTORY_MAX:]
 
 
+class Source(BaseModel):
+    """一条可引用的来源（目前只有 WHO 疾病暴发新闻）。"""
+
+    title: str = Field(..., description="通报标题，原样取自 WHO 接口")
+    date: str = Field(..., description="发布日期 YYYY-MM-DD")
+    url: str = Field(..., description="who.int 上的通报页面")
+
+
 class ChatResponse(BaseModel):
-    """POST /api/chat 响应体。"""
+    """POST /api/chat 响应体。
+
+    sources 是**本轮工具调用真正返回过的**来源。它同时是给用户看的引用列表，
+    和校验器判断「回复里的链接是不是编的」所依据的白名单——回复中出现任何
+    不在这个列表里的链接，这一轮就会被判失败并退回兜底文案。
+    没调用工具（或工具没查到）时它就是空列表，回复里也不该有任何链接。
+    """
 
     reply: str
+    sources: list[Source] = Field(default_factory=list)
 
 
 def _drop_unknown_keys(value: dict, codes: tuple[str, ...]) -> dict:
