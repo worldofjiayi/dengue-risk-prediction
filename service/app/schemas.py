@@ -248,7 +248,7 @@ def _require_known_keys(value: dict, codes: tuple[str, ...], field: str) -> dict
     """
     unknown_keys = set(value) - set(codes)
     if unknown_keys:
-        raise ValueError(f"{field} 含未知字段：{sorted(unknown_keys)}")
+        raise ValueError(f"{field} contains unknown keys: {sorted(unknown_keys)}")
     return value
 
 
@@ -453,7 +453,7 @@ class ChatRequest(BaseModel):
     def _question_not_blank(cls, value: str) -> str:
         text = value.strip()
         if not text:
-            raise ValueError("question 不能为空白")
+            raise ValueError("question must not be blank")
         return text
 
     @field_validator("history")
@@ -568,7 +568,7 @@ class DestinationRequest(BaseModel):
     def _location_not_blank(cls, value: str) -> str:
         text = value.strip()
         if not text:
-            raise ValueError("location 不能为空白")
+            raise ValueError("location must not be blank")
         return text
 
 

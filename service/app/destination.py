@@ -210,7 +210,11 @@ async def run_destination(
     key = _cache_key(canonical, language)
     cached = _cache_get(key, clock)
     if cached is not None:
-        logger.info("目的地查询命中缓存：%s / %s（未发起任何外部调用）", canonical, language)
+        logger.info(
+            "Destination lookup served from cache: %s / %s (no external call made)",
+            canonical,
+            language,
+        )
         return DestinationResponse.model_validate(cached)
 
     # ---- Layer 1: regional table + WHO notices (free and stable, always runs first) ----
@@ -232,7 +236,10 @@ async def run_destination(
         # The switch is on, this input just is not worth paying to search -- to the
         # outside world the same thing as "searched and found nothing"
         status = "degraded"
-        logger.info("目的地查询：%r 不像地名，跳过检索", req.location[:60])
+        logger.info(
+            "Destination lookup: %r does not look like a place name, skipping search",
+            req.location[:60],
+        )
 
     if should_search:
         status = "degraded"
@@ -248,7 +255,7 @@ async def run_destination(
                     deepseek, system, prompt, language, display_location, max_uses
                 )
             except DeepSeekError as exc:
-                logger.warning("目的地检索失败（第 %d 次）：%s", attempt + 1, exc)
+                logger.warning("Destination search failed (attempt %d): %s", attempt + 1, exc)
                 break
 
             search_count += int(outcome.get("search_count") or 0)
@@ -259,7 +266,10 @@ async def run_destination(
             reply = outcome.get("reply") or ""
             candidate = parse_findings(reply)
             if not candidate:
-                logger.info("目的地检索没有可用要点（location=%s）", display_location)
+                logger.info(
+                    "Destination search produced no usable findings (location=%s)",
+                    display_location,
+                )
                 break
 
             search_sources = select_search_sources(search_sources, reply)
@@ -274,9 +284,9 @@ async def run_destination(
                 break
 
             logger.warning(
-                "目的地要点第 %d 次未通过输出校验：%s",
+                "Destination findings failed output verification on attempt %d: %s",
                 attempt + 1,
-                "；".join(v.code for v in violations),
+                "; ".join(v.code for v in violations),
             )
             # A re-ask does not need another lookup -- the facts are already in
             # the previous round's search results
@@ -289,7 +299,7 @@ async def run_destination(
         findings = []
 
     if endemicity not in _ENDEMICITY_VALUES:  # do not 500 if someone breaks the table
-        logger.warning("地区表给出了未知的流行程度取值：%r", endemicity)
+        logger.warning("The regional table gave an unknown endemicity value: %r", endemicity)
         endemicity = "unknown"
 
     merged_sources = merge_sources(
@@ -329,8 +339,8 @@ async def run_destination(
         matched=bool(matched),
     )
     logger.info(
-        "目的地查询完成，耗时 %.2fs（location=%s, endemicity=%s, 检索 %d 次，"
-        "要点 %d 条，来源 %d 条，status=%s）",
+        "Destination lookup finished in %.2fs (location=%s, endemicity=%s, %d search(es), "
+        "%d finding(s), %d source(s), status=%s)",
         time.perf_counter() - t0,
         display_location,
         endemicity,

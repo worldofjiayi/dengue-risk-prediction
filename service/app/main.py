@@ -59,7 +59,7 @@ async def assess(form: FormInput) -> AssessmentResult:
     try:
         return await run_assessment(form)
     except DeepSeekError as exc:
-        logger.error("上游 DeepSeek 服务错误（评估流程未兜住）：%s", exc)
+        logger.error("Upstream DeepSeek service error (not absorbed by the assessment flow): %s", exc)
         raise HTTPException(
             status_code=502,
             detail=UPSTREAM_ERRORS.get(form.language, UPSTREAM_ERRORS["zh-CN"]),
@@ -67,7 +67,7 @@ async def assess(form: FormInput) -> AssessmentResult:
     except HTTPException:
         raise
     except Exception as exc:
-        logger.exception("评估流程发生未知错误")
+        logger.exception("Unknown error in the assessment flow")
         raise HTTPException(
             status_code=500,
             detail=SERVER_ERRORS.get(form.language, SERVER_ERRORS["zh-CN"]),
@@ -85,14 +85,14 @@ async def chat(req: ChatRequest) -> ChatResponse:
     try:
         return await run_chat(req)
     except DeepSeekError as exc:
-        logger.error("追问对话上游错误：%s", exc)
+        logger.error("Upstream error in the follow-up chat: %s", exc)
         raise HTTPException(
             status_code=502, detail=UPSTREAM_ERRORS.get(req.language, UPSTREAM_ERRORS["zh-CN"])
         ) from exc
     except HTTPException:
         raise
     except Exception as exc:
-        logger.exception("追问对话发生未知错误")
+        logger.exception("Unknown error in the follow-up chat")
         raise HTTPException(
             status_code=500, detail=SERVER_ERRORS.get(req.language, SERVER_ERRORS["zh-CN"])
         ) from exc
@@ -115,7 +115,7 @@ async def destination(req: DestinationRequest) -> DestinationResponse:
     try:
         return await run_destination(req)
     except DeepSeekError as exc:
-        logger.error("目的地查询上游错误（未兜住）：%s", exc)
+        logger.error("Upstream error in the destination lookup (not absorbed): %s", exc)
         raise HTTPException(
             status_code=502,
             detail=UPSTREAM_ERRORS.get(req.language, UPSTREAM_ERRORS["zh-CN"]),
@@ -123,7 +123,7 @@ async def destination(req: DestinationRequest) -> DestinationResponse:
     except HTTPException:
         raise
     except Exception as exc:
-        logger.exception("目的地查询发生未知错误")
+        logger.exception("Unknown error in the destination lookup")
         raise HTTPException(
             status_code=500,
             detail=SERVER_ERRORS.get(req.language, SERVER_ERRORS["zh-CN"]),
@@ -140,7 +140,7 @@ async def plan_questions(req: PlanRequest) -> PlanResponse:
     try:
         return plan(req)
     except Exception as exc:
-        logger.exception("问诊规划发生未知错误")
+        logger.exception("Unknown error in the questioning plan")
         raise HTTPException(
             status_code=500,
             detail=SERVER_ERRORS.get(req.language, SERVER_ERRORS["zh-CN"]),
@@ -165,14 +165,14 @@ async def health() -> dict:
 _static_dir = Path(__file__).resolve().parent.parent / "static"
 try:
     if not _static_dir.is_dir():
-        logger.warning("静态目录暂不存在：%s，当前仅提供 API 接口", _static_dir)
+        logger.warning("Static directory does not exist yet: %s, serving the API only", _static_dir)
     app.mount(
         "/",
         StaticFiles(directory=str(_static_dir), html=True, check_dir=False),
         name="static",
     )
 except Exception:
-    logger.exception("挂载静态目录失败（%s），仅提供 API 接口", _static_dir)
+    logger.exception("Failed to mount the static directory (%s), serving the API only", _static_dir)
 
 
 if __name__ == "__main__":

@@ -215,10 +215,12 @@ def fetch_who_notices() -> list[dict]:
             resp.raise_for_status()
             payload = resp.json()
     except Exception as exc:  # every httpx exception + JSON parse errors
-        raise IntelLookupError(f"WHO 疾病暴发新闻接口不可用：{exc}") from exc
+        raise IntelLookupError(
+            f"The WHO Disease Outbreak News API is unavailable: {exc}"
+        ) from exc
     items = payload.get("value") if isinstance(payload, dict) else None
     if not isinstance(items, list):
-        raise IntelLookupError("WHO 接口返回结构异常：缺少 value 列表")
+        raise IntelLookupError("Malformed WHO API response: missing value list")
     return items
 
 
@@ -233,7 +235,10 @@ def _cached_notices(
         items = fetcher()
     except Exception:
         # If we cannot get it, say so honestly -- never fall back to "this is probably the link"
-        logger.warning("WHO 疾病暴发新闻拉取失败，本轮不提供任何来源", exc_info=True)
+        logger.warning(
+            "Failed to fetch WHO Disease Outbreak News, no sources will be offered this round",
+            exc_info=True,
+        )
         return [], True
     _NOTICE_CACHE["items"] = items
     _NOTICE_CACHE["fetched_at"] = now
@@ -317,7 +322,7 @@ def lookup_dengue_context(
         "lookup_failed": failed,
     }
     logger.info(
-        "情报查询：location=%r -> %s（matched=%s, endemicity=%s, notices=%d, failed=%s）",
+        "Intel lookup: location=%r -> %s (matched=%s, endemicity=%s, notices=%d, failed=%s)",
         raw,
         result["location"],
         matched,

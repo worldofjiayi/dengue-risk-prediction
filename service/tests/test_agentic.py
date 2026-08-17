@@ -121,7 +121,7 @@ def test_advice_failure_returns_200_with_template_not_502(live_client, monkeypat
     from app.deepseek_client import DeepSeekClient, DeepSeekError, fallback_advice
 
     async def boom(*args, **kwargs):
-        raise DeepSeekError("上游炸了")
+        raise DeepSeekError("upstream blew up")
 
     monkeypatch.setattr(DeepSeekClient, "chat_json", boom)
     resp = live_client.post("/api/assess", json=form(language=language))

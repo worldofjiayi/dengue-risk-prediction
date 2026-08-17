@@ -166,7 +166,10 @@ async def _infer_notes_symptoms(
     try:
         raw = await client.chat_json(system, user, purpose="features")
     except DeepSeekError:
-        logger.warning("备注症状抽取调用失败，沿用确定性编码", exc_info=True)
+        logger.warning(
+            "Symptom extraction from the notes failed, keeping the deterministic encoding",
+            exc_info=True,
+        )
         return form
 
     infer = raw.get("infer")
@@ -183,7 +186,7 @@ async def _infer_notes_symptoms(
 
     if not applied:
         return form
-    logger.info("备注中识别到额外症状：%s", applied)
+    logger.info("Extra symptoms recognised in the notes: %s", applied)
     return form.model_copy(update={"symptoms": updated})
 
 
@@ -192,7 +195,7 @@ def _parse_advice(raw: dict, language: str) -> tuple[Advice, str]:
     try:
         advice = Advice.model_validate(raw.get("advice", {}))
     except Exception as exc:  # pydantic ValidationError and other structural failures
-        raise DeepSeekError("DeepSeek 建议生成结果不符合要求") from exc
+        raise DeepSeekError("DeepSeek advice output does not meet the contract") from exc
     summary = str(raw.get("summary", "")).strip() or _FALLBACK_SUMMARY[language]
     return advice, summary
 
@@ -207,7 +210,7 @@ def _template_advice(language: str, tier: str) -> tuple[Advice, str]:
 
 def _log_violations(where: str, violations: list[Violation]) -> None:
     logger.warning(
-        "%s 未通过输出校验：%s", where, "；".join(v.code for v in violations)
+        "%s failed output verification: %s", where, "; ".join(v.code for v in violations)
     )
     for violation in violations:
         logger.debug("  %s", violation)
@@ -246,7 +249,7 @@ async def _produce_advice(
         advice, summary = _parse_advice(raw, language)
         violations = verify_advice(advice, summary, language, tier, warning_signs)
         if violations:  # Should not happen: broken template copy, shout about it in the log
-            _log_violations("MOCK 模板建议", violations)
+            _log_violations("MOCK template advice", violations)
         return advice, summary, "template"
 
     user_prompt = adv_user
@@ -257,17 +260,17 @@ async def _produce_advice(
             )
             advice, summary = _parse_advice(raw, language)
         except DeepSeekError as exc:
-            logger.error("建议生成失败（第 %d 次）：%s", attempt + 1, exc)
+            logger.error("Advice generation failed (attempt %d): %s", attempt + 1, exc)
             break
 
         violations = verify_advice(advice, summary, language, tier, warning_signs)
         if not violations:
             return advice, summary, "llm"
-        _log_violations(f"建议生成第 {attempt + 1} 次", violations)
+        _log_violations(f"Advice generation attempt {attempt + 1}", violations)
         # Splice the violations back into the prompt so the model only fixes those spots
         user_prompt = adv_user + "\n\n" + format_violations(violations, as_json=True)
 
-    logger.warning("建议退回模板文案（language=%s, tier=%s）", language, tier)
+    logger.warning("Advice fell back to the template copy (language=%s, tier=%s)", language, tier)
     advice, summary = _template_advice(language, tier)
     return advice, summary, "template"
 
@@ -288,7 +291,7 @@ async def run_assessment(form: FormInput) -> AssessmentResult:
     features = encode_features(form)
     epi_week = get_epi_week()
     logger.info(
-        "步骤1 特征编码完成，耗时 %.2fs，epi_week=%d",
+        "Step 1 feature encoding finished in %.2fs, epi_week=%d",
         time.perf_counter() - t0,
         epi_week,
     )
@@ -297,13 +300,13 @@ async def run_assessment(form: FormInput) -> AssessmentResult:
     # (see schemas.WARNING_SIGN_CODES)
     warning_signs = [c for c in WARNING_SIGN_CODES if form.symptoms.get(c) == "yes"]
     if warning_signs:
-        logger.info("用户报告 WHO 警示征象：%s", warning_signs)
+        logger.info("User reported WHO warning signs: %s", warning_signs)
 
     # Epidemiological exposure: also a rule-based judgement, and it does not enter the
     # feature vector (see evaluate_exposure)
     exposure = evaluate_exposure(form)
     if exposure.factors:
-        logger.info("流行病学暴露：level=%s factors=%s", exposure.level, exposure.factors)
+        logger.info("Epidemiological exposure: level=%s factors=%s", exposure.level, exposure.factors)
 
     # ---- Step 2: score with the three models ----
     t1 = time.perf_counter()
@@ -312,7 +315,7 @@ async def run_assessment(form: FormInput) -> AssessmentResult:
     explanations = model.explain_all(features)
     tier = overall_tier([s.level for s in scores.values()])
     logger.info(
-        "步骤2 模型打分完成，耗时 %.2fs，A=%.1f(%s) B=%.1f(%s) B2=%.1f(%s)，总体档位=%s",
+        "Step 2 model scoring finished in %.2fs, A=%.1f(%s) B=%.1f(%s) B2=%.1f(%s), overall tier=%s",
         time.perf_counter() - t1,
         scores["A"].score, scores["A"].level,
         scores["B"].score, scores["B"].level,
@@ -326,7 +329,7 @@ async def run_assessment(form: FormInput) -> AssessmentResult:
         form, scores, epi_week, warning_signs, exposure, tier, client, settings
     )
     logger.info(
-        "步骤3 建议生成完成，耗时 %.2fs，来源=%s",
+        "Step 3 advice generation finished in %.2fs, source=%s",
         time.perf_counter() - t2,
         advice_source,
     )
@@ -346,7 +349,7 @@ async def run_assessment(form: FormInput) -> AssessmentResult:
         model_note=MODEL_NOTES[form.language],
         advice_source=advice_source,
     )
-    logger.info("评估完成，总耗时 %.2fs", time.perf_counter() - t0)
+    logger.info("Assessment finished, total %.2fs", time.perf_counter() - t0)
 
     log_assessment(form, features, scores, epi_week, exposure)
     return result
@@ -363,7 +366,7 @@ def _make_tool_executor(collected: list[dict]):
 
     def execute(name: str, args: dict) -> dict:
         if name != INTEL_TOOL_NAME:
-            logger.warning("模型请求了未知工具：%r", name)
+            logger.warning("The model requested an unknown tool: %r", name)
             return {"error": f"unknown tool '{name}'", "lookup_failed": True}
         location = str((args or {}).get("location", "")).strip()[:120]
         result = lookup_dengue_context(location)
@@ -447,8 +450,8 @@ async def _run_chat_with_search(
         violations = verify_chat_reply(reply, req.language, [s.url for s in sources])
         if not violations:
             logger.info(
-                "追问对话（检索版）完成，耗时 %.2fs（language=%s, location=%s，"
-                "检索 %d 次，来源 %d 条）",
+                "Follow-up chat (search version) finished in %.2fs (language=%s, location=%s, "
+                "%d search(es), %d source(s))",
                 time.perf_counter() - t0,
                 req.language,
                 location,
@@ -458,7 +461,7 @@ async def _run_chat_with_search(
             log_search("chat", req.language, location, search_count, "ok", matched=True)
             return ChatResponse(reply=reply, sources=sources, search_count=search_count)
 
-        _log_violations(f"追问回复（检索版）第 {attempt + 1} 次", violations)
+        _log_violations(f"Follow-up reply (search version) attempt {attempt + 1}", violations)
         messages = [
             {"role": "user", "content": user},
             {"role": "assistant", "content": reply},
@@ -468,8 +471,9 @@ async def _run_chat_with_search(
         max_uses = 0
 
     logger.warning(
-        "追问回复（检索版）两次均未通过输出校验（%s），返回兜底文案",
-        "；".join(v.code for v in violations),
+        "Follow-up reply (search version) failed output verification both times (%s), "
+        "returning the fallback copy",
+        "; ".join(v.code for v in violations),
     )
     log_search("chat", req.language, location, search_count, "degraded", matched=True)
     return ChatResponse(
@@ -521,7 +525,9 @@ async def run_chat(req: ChatRequest) -> ChatResponse:
     if location and settings.search_enabled:
         return await _run_chat_with_search(req, location, t0)
     if location:
-        logger.info("识别到地点 %s，但 SEARCH_ENABLED=false，走无检索路径", location)
+        logger.info(
+        "Recognised location %s, but SEARCH_ENABLED=false, taking the no-search path", location
+    )
 
     system, user = build_chat_prompt(req)
     client = DeepSeekClient()
@@ -552,8 +558,8 @@ async def run_chat(req: ChatRequest) -> ChatResponse:
         violations = verify_chat_reply(reply, req.language, [s.url for s in sources])
         if not violations:
             logger.info(
-                "追问对话完成，耗时 %.2fs（language=%s, tier=%s, history=%d 条，"
-                "工具调用 %d 次，来源 %d 条）",
+                "Follow-up chat finished in %.2fs (language=%s, tier=%s, history=%d message(s), "
+                "%d tool call(s), %d source(s))",
                 time.perf_counter() - t0,
                 req.language,
                 tier,
@@ -563,7 +569,7 @@ async def run_chat(req: ChatRequest) -> ChatResponse:
             )
             return ChatResponse(reply=reply, sources=sources)
 
-        _log_violations(f"追问回复第 {attempt + 1} 次", violations)
+        _log_violations(f"Follow-up reply attempt {attempt + 1}", violations)
         messages = [
             {"role": "user", "content": user},
             {"role": "assistant", "content": reply},
@@ -571,7 +577,7 @@ async def run_chat(req: ChatRequest) -> ChatResponse:
         ]
 
     logger.warning(
-        "追问回复两次均未通过输出校验（%s），返回兜底文案",
-        "；".join(v.code for v in violations),
+        "Follow-up reply failed output verification both times (%s), returning the fallback copy",
+        "; ".join(v.code for v in violations),
     )
     return ChatResponse(reply=_UNRELIABLE_REPLY[req.language], sources=[])

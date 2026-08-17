@@ -833,10 +833,14 @@ def parse_search_response(payload: dict, purpose: str = "search") -> dict:
     it is half an answer.
     """
     if not isinstance(payload, dict):
-        raise DeepSeekError(f"检索接口返回结构异常：顶层不是对象（purpose={purpose}）")
+        raise DeepSeekError(
+            f"Malformed search API response: top level is not an object (purpose={purpose})"
+        )
     content = payload.get("content")
     if not isinstance(content, list):
-        raise DeepSeekError(f"检索接口返回结构异常：缺少 content 列表（purpose={purpose}）")
+        raise DeepSeekError(
+            f"Malformed search API response: missing content list (purpose={purpose})"
+        )
 
     texts: list[str] = []
     sources: list[dict] = []
@@ -854,7 +858,8 @@ def parse_search_response(payload: dict, purpose: str = "search") -> dict:
 
     if payload.get("stop_reason") == "max_tokens":
         logger.warning(
-            "检索回复被 max_tokens 截断（purpose=%s）：答案可能不完整，考虑调大 max_tokens",
+            "Search reply truncated by max_tokens (purpose=%s): the answer may be "
+            "incomplete, consider raising max_tokens",
             purpose,
         )
     return {
@@ -893,7 +898,7 @@ def _tool_call_args(call: dict) -> dict:
     try:
         parsed = json.loads(raw or "{}")
     except (json.JSONDecodeError, TypeError):
-        logger.warning("工具调用参数不是合法 JSON，按空参数处理：%r", raw)
+        logger.warning("Tool call arguments are not valid JSON, treating as empty: %r", raw)
         return {}
     return parsed if isinstance(parsed, dict) else {}
 
@@ -910,7 +915,7 @@ async def _run_tool(
     try:
         result = await anyio.to_thread.run_sync(_call)
     except Exception as exc:  # A crash inside the tool itself should not turn the whole conversation into a 502
-        logger.warning("工具 %s 执行失败：%s", name, exc, exc_info=True)
+        logger.warning("Tool %s failed: %s", name, exc, exc_info=True)
         return {"error": f"tool '{name}' failed: {exc}", "lookup_failed": True}
     return result if isinstance(result, dict) else {"result": result}
 
@@ -956,21 +961,23 @@ class DeepSeekClient:
             resp.raise_for_status()
         except httpx.HTTPStatusError as exc:
             raise DeepSeekError(
-                f"DeepSeek 接口返回错误状态码 {exc.response.status_code}（purpose={purpose}）"
+                f"DeepSeek API returned error status {exc.response.status_code} (purpose={purpose})"
             ) from exc
         except httpx.HTTPError as exc:
             raise DeepSeekError(
-                f"无法连接 DeepSeek 服务（purpose={purpose}）：{exc}"
+                f"Cannot reach the DeepSeek service (purpose={purpose}): {exc}"
             ) from exc
 
         try:
             message = resp.json()["choices"][0]["message"]
         except (KeyError, IndexError, TypeError, ValueError) as exc:
             raise DeepSeekError(
-                f"DeepSeek 返回结构异常，缺少 choices/message（purpose={purpose}）"
+                f"Malformed DeepSeek response, missing choices/message (purpose={purpose})"
             ) from exc
         if not isinstance(message, dict):
-            raise DeepSeekError(f"DeepSeek 返回的 message 不是对象（purpose={purpose}）")
+            raise DeepSeekError(
+                f"DeepSeek returned a message that is not an object (purpose={purpose})"
+            )
         return message
 
     async def _request(
@@ -988,7 +995,7 @@ class DeepSeekClient:
         content = message.get("content")
         if content is None:
             raise DeepSeekError(
-                f"DeepSeek 返回结构异常，缺少 choices/message/content（purpose={purpose}）"
+                f"Malformed DeepSeek response, missing choices/message/content (purpose={purpose})"
             )
         return content
 
@@ -1015,7 +1022,7 @@ class DeepSeekClient:
         # MOCK mode: send no request, return fake data directly
         if settings.mock_mode:
             logger.info(
-                "MOCK_MODE 开启，返回 %s 假数据（language=%s, tier=%s）",
+                "MOCK_MODE is on, returning fake %s data (language=%s, tier=%s)",
                 purpose,
                 language,
                 tier,
@@ -1037,11 +1044,11 @@ class DeepSeekClient:
                 try:
                     data = json.loads(content)
                     if not isinstance(data, dict):
-                        raise json.JSONDecodeError("顶层不是 JSON 对象", content, 0)
+                        raise json.JSONDecodeError("top level is not a JSON object", content, 0)
                     return data
                 except json.JSONDecodeError as exc:
                     logger.warning(
-                        "DeepSeek 第 %d 次输出无法解析为 JSON（purpose=%s）：%s",
+                        "DeepSeek output could not be parsed as JSON on attempt %d (purpose=%s): %s",
                         attempt + 1,
                         purpose,
                         exc,
@@ -1059,7 +1066,7 @@ class DeepSeekClient:
                     )
 
         raise DeepSeekError(
-            f"DeepSeek 连续 {1 + _JSON_RETRIES} 次未能返回合法 JSON（purpose={purpose}）"
+            f"DeepSeek failed to return valid JSON {1 + _JSON_RETRIES} times in a row (purpose={purpose})"
         )
 
 
@@ -1095,7 +1102,7 @@ class DeepSeekClient:
 
         if settings.mock_mode:
             logger.info(
-                "MOCK_MODE 开启，返回检索假数据（language=%s, location=%r）",
+                "MOCK_MODE is on, returning fake search data (language=%s, location=%r)",
                 language,
                 mock_location,
             )
@@ -1129,16 +1136,20 @@ class DeepSeekClient:
                 data = resp.json()
         except httpx.HTTPStatusError as exc:
             raise DeepSeekError(
-                f"检索接口返回错误状态码 {exc.response.status_code}（purpose={purpose}）"
+                f"Search API returned error status {exc.response.status_code} (purpose={purpose})"
             ) from exc
         except httpx.HTTPError as exc:
-            raise DeepSeekError(f"无法连接检索接口（purpose={purpose}）：{exc}") from exc
+            raise DeepSeekError(
+                f"Cannot reach the search API (purpose={purpose}): {exc}"
+            ) from exc
         except ValueError as exc:  # The response is not JSON
-            raise DeepSeekError(f"检索接口返回的不是 JSON（purpose={purpose}）") from exc
+            raise DeepSeekError(
+                f"Search API did not return JSON (purpose={purpose})"
+            ) from exc
 
         outcome = parse_search_response(data, purpose=purpose)
         logger.info(
-            "检索完成（purpose=%s）：检索 %d 次，取回 %d 条来源，回复 %d 字",
+            "Search finished (purpose=%s): %d search(es), %d source(s) retrieved, %d chars of reply",
             purpose,
             outcome["search_count"],
             len(outcome["sources"]),
@@ -1203,7 +1214,7 @@ class DeepSeekClient:
                     }
 
                 logger.info(
-                    "第 %d 轮：模型请求调用 %d 个工具（%s）",
+                    "Round %d: the model requested %d tool call(s) (%s)",
                     round_index + 1,
                     len(calls),
                     ", ".join(_tool_call_name(c) for c in calls),
@@ -1256,10 +1267,13 @@ class DeepSeekClient:
         """
         location = find_location(probe or "")
         if location is None:
-            logger.info("MOCK_MODE 开启，问题未提到已知地区，返回通用假回复")
+            logger.info(
+                "MOCK_MODE is on, the question mentions no known region, "
+                "returning the generic fake reply"
+            )
             return {"reply": build_mock_chat_reply(language, tier), "tool_results": []}
 
-        logger.info("MOCK_MODE 开启，模拟一轮工具调用：location=%s", location)
+        logger.info("MOCK_MODE is on, simulating one round of tool calls: location=%s", location)
         args = {"location": location}
         result = await _run_tool(tool_executor, INTEL_TOOL_NAME, args)
         return {

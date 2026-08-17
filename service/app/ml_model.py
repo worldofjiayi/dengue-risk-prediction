@@ -147,7 +147,7 @@ def _load_models() -> dict[str, dict]:
     models: dict[str, dict] = {}
     for key in MODEL_KEYS:
         if key not in raw:
-            raise ValueError(f"模型文件缺少模型 {key}：{_MODEL_PATH}")
+            raise ValueError(f"Model file is missing model {key}: {_MODEL_PATH}")
         entry = raw[key]
         coef = {k: float(v) for k, v in entry["coef"].items()}
         models[key] = {
@@ -157,7 +157,11 @@ def _load_models() -> dict[str, dict]:
         }
         missing = set(FEATS) - set(coef)
         if missing:
-            logger.warning("模型 %s 缺少特征系数 %s，将按 0 处理", key, sorted(missing))
+            logger.warning(
+                "Model %s is missing feature coefficients %s, treating them as 0",
+                key,
+                sorted(missing),
+            )
     return models
 
 
@@ -324,5 +328,5 @@ def get_model() -> DengueModel:
     global _model
     if _model is None:
         _model = DengueModel()
-        logger.info("登革热模型已加载：%s", list(_model.info()))
+        logger.info("Dengue models loaded: %s", list(_model.info()))
     return _model

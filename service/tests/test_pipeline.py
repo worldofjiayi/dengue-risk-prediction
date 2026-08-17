@@ -913,7 +913,7 @@ def test_chat_upstream_error_returns_localized_502(client, monkeypatch):
     from app.schemas import UPSTREAM_ERRORS
 
     async def boom(*args, **kwargs):
-        raise DeepSeekError("上游炸了")
+        raise DeepSeekError("upstream blew up")
 
     monkeypatch.setattr(DeepSeekClient, "chat_with_tools", boom)
     resp = client.post("/api/chat", json=chat_body(language="es"))
@@ -926,7 +926,7 @@ def test_chat_unexpected_error_returns_localized_500(client, monkeypatch):
     from app.schemas import SERVER_ERRORS
 
     async def boom(*args, **kwargs):
-        raise RuntimeError("意外错误")
+        raise RuntimeError("unexpected error")
 
     monkeypatch.setattr(DeepSeekClient, "chat_with_tools", boom)
     resp = client.post("/api/chat", json=chat_body(language="en"))

@@ -317,7 +317,7 @@ def test_eval_stats_report_prints_exposure_distribution(tmp_path, capsys):
     ]
     print_report(compute_stats(records), 0, tmp_path / "assessments.jsonl")
     out = capsys.readouterr().out
-    assert "流行病学暴露等级分布" in out
+    assert "Epidemiological exposure level distribution" in out
     assert "high" in out
 
 
@@ -357,7 +357,7 @@ def test_eval_stats_main_missing_file(tmp_path, capsys):
     from scripts.eval_stats import main
 
     assert main([str(tmp_path / "不存在.jsonl")]) == 1
-    assert "文件不存在" in capsys.readouterr().err
+    assert "File does not exist" in capsys.readouterr().err
 
 
 def test_record_uses_real_epi_week(client, log_path):

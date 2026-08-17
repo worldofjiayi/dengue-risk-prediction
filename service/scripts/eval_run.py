@@ -153,20 +153,20 @@ def load_scenarios(path: Path) -> list[dict]:
     """Read and sanity-check the scenario file: list of objects, unique ids, valid endpoint."""
     raw = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(raw, list):
-        raise ValueError(f"场景文件顶层必须是 JSON 列表：{path}")
+        raise ValueError(f"Scenario file top level must be a JSON list: {path}")
     seen: set[str] = set()
     for scenario in raw:
         if not isinstance(scenario, dict) or "id" not in scenario:
-            raise ValueError("每个场景必须是含 id 的 JSON 对象")
+            raise ValueError("Every scenario must be a JSON object with an id")
         sid = scenario["id"]
         if sid in seen:
-            raise ValueError(f"场景 id 重复：{sid}")
+            raise ValueError(f"Duplicate scenario id: {sid}")
         seen.add(sid)
         endpoint = scenario.get("endpoint", "assess")
         if endpoint not in ENDPOINTS:
-            raise ValueError(f"场景 {sid} 的 endpoint 非法：{endpoint}")
+            raise ValueError(f"Scenario {sid} has an invalid endpoint: {endpoint}")
         if "request" not in scenario or "checks" not in scenario:
-            raise ValueError(f"场景 {sid} 缺少 request 或 checks")
+            raise ValueError(f"Scenario {sid} is missing request or checks")
     return raw
 
 
@@ -614,7 +614,7 @@ def run_scenarios(
         by_id = {s["id"]: s for s in scenarios}
         unknown = [sid for sid in only if sid not in by_id]
         if unknown:
-            raise ValueError(f"--only 指定了不存在的场景 id：{unknown}")
+            raise ValueError(f"--only named scenario ids that do not exist: {unknown}")
         selected = [by_id[sid] for sid in only]
 
     _clear_failures_dir(failures_dir)
@@ -679,33 +679,37 @@ def print_report(summary: dict, failures_dir: Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="登革热风险服务场景化评测运行器")
-    parser.add_argument("--json", action="store_true", help="输出机器可读 JSON 结果")
+    parser = argparse.ArgumentParser(
+        description="Scenario-based evaluation runner for the dengue risk service"
+    )
+    parser.add_argument(
+        "--json", action="store_true", help="print machine-readable JSON results"
+    )
     parser.add_argument(
         "--only",
         default="",
-        help="只运行指定场景，逗号分隔的 id 列表，如 --only a,b",
+        help="run only the named scenarios, a comma-separated list of ids, e.g. --only a,b",
     )
     parser.add_argument(
         "--scenarios",
         default=str(DEFAULT_SCENARIOS),
-        help="场景文件路径（默认 service/eval/scenarios.json）",
+        help="path to the scenario file (default service/eval/scenarios.json)",
     )
     parser.add_argument(
         "--failures-dir",
         default=str(DEFAULT_FAILURES_DIR),
-        help="失败案例转储目录（默认 service/eval/failures）",
+        help="directory for dumped failure cases (default service/eval/failures)",
     )
     args = parser.parse_args(argv)
 
     scenarios_path = Path(args.scenarios)
     if not scenarios_path.is_file():
-        print(f"场景文件不存在：{scenarios_path}", file=sys.stderr)
+        print(f"Scenario file does not exist: {scenarios_path}", file=sys.stderr)
         return 2
     try:
         scenarios = load_scenarios(scenarios_path)
     except (ValueError, json.JSONDecodeError) as exc:
-        print(f"场景文件非法：{exc}", file=sys.stderr)
+        print(f"Invalid scenario file: {exc}", file=sys.stderr)
         return 2
 
     only = [sid.strip() for sid in args.only.split(",") if sid.strip()]

@@ -103,7 +103,11 @@ def _append(record: dict, what: str) -> None:
         with open(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
     except OSError:
-        logger.exception("%s写入失败（%s），本次请求结果不受影响", what, raw_path)
+        logger.exception(
+            "Failed to write the %s (%s); this request's result is unaffected",
+            what,
+            raw_path,
+        )
 
 
 def log_assessment(
@@ -114,7 +118,7 @@ def log_assessment(
     exposure: ExposureContext | None = None,
 ) -> None:
     """Append one evaluation record; an empty EVAL_LOG_PATH turns logging off."""
-    _append(build_record(form, features, scores, epi_week, exposure), "评测记录")
+    _append(build_record(form, features, scores, epi_week, exposure), "assessment record")
 
 
 def build_search_record(
@@ -162,5 +166,5 @@ def log_search(
         build_search_record(
             kind, language, location, search_count, search_status, matched
         ),
-        "检索记录",
+        "search record",
     )

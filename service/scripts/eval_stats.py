@@ -35,11 +35,11 @@ DEFAULT_PATH = Path(__file__).resolve().parent.parent / "data" / "assessments.js
 BUCKET_WIDTH = 10
 NUM_BUCKETS = 10
 
-# Result field -> Chinese display name
+# Result field -> display name
 MODEL_FIELDS = {
-    "dengue": "登革热可能性 (模型A)",
-    "worsening": "病情加重风险 (模型B)",
-    "severe": "重症风险 (模型B2)",
+    "dengue": "Dengue likelihood (model A)",
+    "worsening": "Worsening risk (model B)",
+    "severe": "Severe risk (model B2)",
 }
 
 
@@ -205,25 +205,28 @@ def _print_search(search: dict) -> None:
         return
     n = search["n"]
     print()
-    print(f"联网检索花销（可能检索的请求 n={n}）：")
+    print(f"Web search cost (requests that could search, n={n}):")
     print(
-        f"  总检索次数 {search['total']}  均值 {search['mean']} 次/请求  "
-        f"单次最多 {search['max']} 次  零检索 {search['zero']} 次"
-        f"（{round(search['zero'] * 100.0 / n, 1)}%）"
+        f"  {search['total']} search(es) total  mean {search['mean']} per request  "
+        f"max {search['max']} in one request  {search['zero']} with no search"
+        f" ({round(search['zero'] * 100.0 / n, 1)}%)"
     )
     for kind, bucket in search.get("by_kind", {}).items():
-        print(f"  {kind:>12}  n={bucket['n']:<5} 合计 {bucket['total']:<5} 均值 {bucket['mean']}")
+        print(f"  {kind:>12}  n={bucket['n']:<5} total {bucket['total']:<5} mean {bucket['mean']}")
     statuses = "  ".join(f"{k}={v}" for k, v in search.get("statuses", {}).items())
     if statuses:
-        print(f"  状态分布：{statuses}")
+        print(f"  Status distribution: {statuses}")
 
 
 def print_report(stats: dict, skipped: int, path: Path) -> None:
     """Print the statistics report in a human-readable format."""
     total = stats["total"]
     search = stats.get("search") or {}
-    print(f"评测数据文件：{path}")
-    print(f"记录总数：{total}（跳过坏行 {skipped} 条，其中 MOCK 记录 {stats['mock_count']} 条）")
+    print(f"Evaluation data file: {path}")
+    print(
+        f"Records: {total} ({skipped} malformed line(s) skipped, "
+        f"{stats['mock_count']} MOCK record(s))"
+    )
     if total == 0:
         _print_search(search)  # a file with only search records should still show its cost
         return
@@ -246,13 +249,16 @@ def print_report(stats: dict, skipped: int, path: Path) -> None:
             f"{lv}={info['count']}({info['percent']}%)"
             for lv, info in m["levels"].items()
         )
-        print(f"  等级占比：{levels}")
+        print(f"  Level shares: {levels}")
 
     exposure = stats.get("exposure_levels") or {}
     if exposure:
         n = sum(exposure.values())
         print()
-        print(f"流行病学暴露等级分布（规则判断，非模型输出；n={n}）：")
+        print(
+            f"Epidemiological exposure level distribution "
+            f"(rule-based, not model output; n={n}):"
+        )
         for level in ("low", "medium", "high"):
             count = exposure.get(level, 0)
             print(f"  {level:>6}  {count:>5}  ({round(count * 100.0 / n, 1)}%)")
@@ -261,34 +267,34 @@ def print_report(stats: dict, skipped: int, path: Path) -> None:
                 print(f"  {level:>6}  {count:>5}")
 
     print()
-    print("语言分布：")
+    print("Language distribution:")
     for lang, count in stats["languages"].items():
         print(f"  {lang:>6}  {count:>5}")
     if stats["epi_weeks"]:
         weeks = "  ".join(f"W{w}={c}" for w, c in stats["epi_weeks"].items())
-        print(f"\n流行病学周分布：{weeks}")
+        print(f"\nEpidemiological week distribution: {weeks}")
 
     _print_search(search)
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="评估回流数据统计")
+    parser = argparse.ArgumentParser(description="Statistics over the evaluation log data")
     parser.add_argument(
         "path",
         nargs="?",
         default=str(DEFAULT_PATH),
-        help="JSONL 文件路径（默认 data/assessments.jsonl）",
+        help="path to the JSONL file (default data/assessments.jsonl)",
     )
     parser.add_argument(
         "--json",
         action="store_true",
-        help="输出机器可读 JSON（含 skipped 字段），便于导出到其他工具",
+        help="print machine-readable JSON (including the skipped field) for export to other tools",
     )
     args = parser.parse_args(argv)
 
     path = Path(args.path)
     if not path.is_file():
-        print(f"文件不存在：{path}", file=sys.stderr)
+        print(f"File does not exist: {path}", file=sys.stderr)
         return 1
 
     records, skipped = load_records(path)
