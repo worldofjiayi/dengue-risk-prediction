@@ -1,8 +1,11 @@
-"""应用配置：从环境变量 / .env 文件读取。
+"""Application configuration: read from environment variables / the .env file.
 
-.env 固定按本文件位置解析到 service/.env（本地与远程 /opt/jiayi/service/.env 一致），
-不依赖进程启动目录——无论从项目根还是 service/ 目录启动 uvicorn 行为都相同。
-环境变量的优先级始终高于 .env 文件（pydantic-settings 默认行为，测试依赖这一点）。
+The .env path is always resolved relative to *this file* to service/.env (the same
+layout locally and remotely at /opt/jiayi/service/.env), never relative to the
+process working directory — starting uvicorn from the project root or from
+service/ behaves identically.
+Environment variables always take precedence over the .env file (the
+pydantic-settings default; the tests rely on this).
 """
 
 from functools import lru_cache
@@ -10,43 +13,47 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# service/ 目录（app/ 的上一级）
+# The service/ directory (one level above app/)
 _SERVICE_ROOT = Path(__file__).resolve().parent.parent
 
 
 class Settings(BaseSettings):
-    """服务全局配置，字段名与 .env 中的环境变量一一对应（大小写不敏感）。"""
+    """Global service configuration; field names map one-to-one onto the
+    environment variables in .env (case-insensitive)."""
 
-    # DeepSeek 配置
+    # DeepSeek configuration
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-chat"
-    deepseek_timeout: float = 60.0  # DeepSeek 请求超时（秒）
+    deepseek_timeout: float = 60.0  # DeepSeek request timeout (seconds)
 
-    # ML 模型配置：为空或文件不存在时使用内置启发式假模型
+    # ML model configuration: when empty, or the file does not exist, the
+    # built-in heuristic mock model is used instead.
     ml_model_path: str = ""
 
-    # 评测数据回流：每次评估完成后把脱敏记录追加到该 JSONL 文件
-    # （相对路径相对项目根目录解析；置空则关闭回流）
+    # Evaluation data feedback loop: after every completed assessment, append a
+    # de-identified record to this JSONL file.
+    # (Relative paths resolve against the project root; leave empty to disable.)
     eval_log_path: str = "data/assessments.jsonl"
 
-    # 演示模式：true 时 DeepSeek 与 ML 模型都返回可信假数据
+    # Demo mode: when true, both DeepSeek and the ML model return plausible fake data
     mock_mode: bool = True
 
-    # ---- 联网检索（DeepSeek Anthropic 协议的 web_search 服务端工具）----
+    # ---- Web search (the web_search server-side tool of DeepSeek's Anthropic protocol) ----
     #
-    # 检索是这个服务里**唯一按次计费且费用不可预测**的东西：实测一个普通问题
-    # 触发了 4 次检索、约 13.9k 输入 token。因此三个旋钮都留在配置里，
-    # 出事时不用改代码就能关掉。
+    # Search is the **only metered, cost-unpredictable** thing in this service: in
+    # a measured run, one ordinary question triggered 4 searches and about 13.9k
+    # input tokens. That is why all three knobs stay in the configuration — when
+    # something goes wrong it can be turned off without a code change.
     #
-    # search_enabled            总开关：false 时任何路径都不会发起检索
-    # search_max_uses           单次请求允许的检索次数上限（传给 web_search 工具）
-    # search_cache_ttl_seconds  目的地查询的缓存有效期（按 地点 × 语言 缓存）
+    # search_enabled            master switch: when false no code path issues a search
+    # search_max_uses           per-request cap on search count (passed to the web_search tool)
+    # search_cache_ttl_seconds  cache lifetime for destination lookups (keyed by place × language)
     search_enabled: bool = True
     search_max_uses: int = 2
     search_cache_ttl_seconds: int = 6 * 60 * 60
 
-    # 服务监听
+    # Server bind address
     host: str = "0.0.0.0"
     port: int = 8000
 
@@ -59,5 +66,6 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    """全局单例配置（lru_cache 缓存；测试中可用 get_settings.cache_clear() 重置）。"""
+    """Process-wide singleton configuration (cached by lru_cache; tests can reset
+    it with get_settings.cache_clear())."""
     return Settings()

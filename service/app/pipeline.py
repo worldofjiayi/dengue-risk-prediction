@@ -1,30 +1,43 @@
-"""评估流水线：问卷 -> 特征编码 -> 三模型打分 -> DeepSeek 生成建议 -> 结果组装。
+"""Assessment pipeline: questionnaire -> feature encoding -> three-model scoring ->
+DeepSeek advice generation -> result assembly.
 
-特征编码是**确定性的**（app.ml_model.encode_features），这是权威来源。
-DeepSeek 的第一次调用只做一件补充工作：从用户的自由文本备注里识别出
-「描述了但没勾选」的症状，把对应项从 unknown 提升为 yes。
-该步骤失败不影响评估——直接沿用确定性编码结果。
+Feature encoding is **deterministic** (app.ml_model.encode_features) and is the
+authoritative source. The first DeepSeek call does one supplementary job only: pick out
+the symptoms the user "described but did not tick" in their free-text notes, and lift
+those items from unknown to yes. A failure in that step does not affect the
+assessment -- we simply keep the deterministic encoding.
 
-除模型评分外，本模块还产出两条**与模型无关的规则判断**：
-  warning_signs    —— WHO 登革热警示征象（VOMITO / PETEQUIA_N）
-  exposure_context —— 流行病学暴露背景（身边有确诊病例 / 去过暴发地区 / 周围发热聚集）
-两者都不进入 26 维特征向量，也不参与打分，只与评分并列呈现。
+Besides the model scores, this module produces two **rule-based judgements that have
+nothing to do with the model**:
+  warning_signs    -- WHO dengue warning signs (VOMITO / PETEQUIA_N)
+  exposure_context -- epidemiological exposure background (a confirmed case nearby /
+                      travel to an outbreak area / a cluster of fevers around the user)
+Neither enters the 26-dimensional feature vector nor takes part in scoring; they are
+only presented alongside the scores.
 
-本模块另外承载 /api/chat 的追问对话（run_chat）——无状态，上下文由前端回传，
-并**按问题里有没有地点分成两条路**：没有地点就给模型挂上一个可自主调用的工具
-（app.intel.lookup_dengue_context），有地点则改走联网检索（见 _run_chat_with_search）。
-行前目的地查询 /api/destination 在 app.destination 里，两者共用同一套来源与校验规则。
+This module also carries the /api/chat follow-up conversation (run_chat) -- stateless,
+with the context posted back by the front end, and **split into two paths by whether the
+question mentions a location**: with no location the model is handed a tool it can call
+on its own (app.intel.lookup_dengue_context); with a location we switch to web search
+(see _run_chat_with_search). The pre-travel destination lookup /api/destination lives in
+app.destination; the two share the same source and verification rules.
 
-**生成之后还有一道闸门**：所有 LLM 文本在返回前都要过 app.verifier 的规则校验
-（剂量、感染概率、就医紧迫性、语言一致性、结构、编造链接）。不通过就带着违规
-说明重问一次；还不通过就退回模板 / 兜底文案。因此：
+**There is one more gate after generation**: every LLM text has to pass app.verifier's
+rule checks before it is returned (dosage, infection probability, urgency of seeking
+care, language consistency, structure, fabricated links). If it fails we ask again once
+with the violations spelled out; if it still fails we fall back to the template /
+fallback copy. Therefore:
 
-  - 建议生成失败**不再让整次评估失败**。评分是本地算出来的，是这个服务真正
-    值钱的部分；因为一句自然语言拿不到就把 200 变成 502，是拿用户已经得到的
-    结果去赔一个可以替代的段落。改为返回 200 + 模板建议 + advice_source=template。
-  - /api/chat 没有可退的东西（回复本身就是全部产出），仍然 502。
+  - A failure to generate advice **no longer fails the whole assessment**. The scores are
+    computed locally and are the part of this service that is genuinely worth something;
+    turning a 200 into a 502 because one natural-language sentence could not be fetched
+    pays for a replaceable paragraph with the result the user already has. We now return
+    200 + template advice + advice_source=template.
+  - /api/chat has nothing to fall back on (the reply is the entire output), so it still
+    returns 502.
 
-日志中不记录 notes 原文，避免用户敏感信息进入日志。
+The raw notes text is never written to the log, to keep sensitive user information out
+of the logs.
 """
 
 import logging
@@ -69,10 +82,10 @@ from app.verifier import (
 
 logger = logging.getLogger(__name__)
 
-# 风险等级由低到高，用于取「三个模型中最高的那一档」
+# Risk levels from low to high, used to take "the highest band of the three models"
 _LEVEL_ORDER: tuple[str, ...] = ("low", "medium", "high")
 
-# summary 缺失时的兜底文案（五语言）
+# Fallback copy for a missing summary (five languages)
 _FALLBACK_SUMMARY = {
     "zh-CN": "已完成风险评估，请结合下方建议做好防蚊防护与健康监测。",
     "zh-TW": "已完成風險評估，請結合下方建議做好防蚊防護與健康監測。",
@@ -82,12 +95,14 @@ _FALLBACK_SUMMARY = {
 }
 
 
-# 追问回复两次都没通过输出校验时的兜底（五语言）。
+# Fallback for a follow-up reply that failed output verification twice (five languages).
 #
-# 刻意不试图「大致回答一下」：校验没过说明这段文字里有不该出现的东西，
-# 把它端出去比不回答更糟，宁可承认这一轮不可靠。
-# 「回复为空」现在也是一条违规（verifier 的 empty 规则），因此空回复与其他
-# 违规共用这同一条路，不再需要第二份措辞不同、迟早会各自漂移的兜底句。
+# Deliberately does not try to "answer roughly anyway": a failed check means the text
+# contains something that should not be there, and serving it is worse than not
+# answering -- better to admit this round is unreliable.
+# "Empty reply" is now a violation too (the verifier's empty rule), so an empty reply
+# shares this same path with every other violation; we no longer need a second fallback
+# sentence, worded differently, that would sooner or later drift away from this one.
 _UNRELIABLE_REPLY = {
     "zh-CN": "抱歉，我这次无法给出可靠的回答，请咨询当地的医疗机构或公共卫生服务。若症状加重请尽快就医。",
     "zh-TW": "抱歉，這次無法給出可靠的回覆，請諮詢當地醫療院所或公共衛生服務。若症狀加重請儘快就醫。",
@@ -96,17 +111,18 @@ _UNRELIABLE_REPLY = {
     "pt": "Não consigo dar uma resposta confiável agora — consulte um serviço de saúde local. Se os sintomas piorarem, procure atendimento médico o quanto antes.",
 }
 
-# 建议生成的输出校验最多重问几次（不含首次）
+# How many re-asks output verification of the advice gets at most (first try excluded)
 _ADVICE_VERIFY_RETRIES = 1
-# 追问回复的输出校验最多重问几次（不含首次）
+# How many re-asks output verification of a follow-up reply gets (first try excluded)
 _CHAT_VERIFY_RETRIES = 1
 
 
 def overall_tier(levels: list[str]) -> str:
-    """取一组风险等级中最高的一档（high > medium > low）。
+    """Take the highest band out of a set of risk levels (high > medium > low).
 
-    用于给建议生成与追问对话一个「总体档位」：只要有任何一个模型报到 high，
-    整体口径就按 high 走——宁可多提醒一次，也不要让高分被两个低分平均掉。
+    Gives advice generation and the follow-up conversation a single "overall band": as
+    soon as any one model reports high, the overall wording follows high -- better to
+    warn once too often than to let a high score be averaged away by two low ones.
     """
     best = "low"
     for level in levels:
@@ -116,18 +132,20 @@ def overall_tier(levels: list[str]) -> str:
 
 
 def evaluate_exposure(form: FormInput) -> ExposureContext:
-    """流行病学暴露的**规则判断**（不经过任何模型）。
+    """**Rule-based judgement** of epidemiological exposure (no model involved).
 
-        high   —— CONFIRMED_CASE 或 OUTBREAK_TRAVEL 为 yes
-        medium —— FEVER_CLUSTER 为 yes 且未达 high
-        low    —— 其余情况
+        high   -- CONFIRMED_CASE or OUTBREAK_TRAVEL is yes
+        medium -- FEVER_CLUSTER is yes and high was not reached
+        low    -- everything else
 
-    只有明确回答 yes 才算数：与症状编码一样，「不知道」不等于「有」，
-    不能凭用户的不确定去抬高风险提示。
+    Only an explicit yes counts: as with symptom encoding, "don't know" does not mean
+    "yes", and a user's uncertainty must not be used to raise the risk warning.
 
-    为什么不并入模型：SINAN 通报数据里没有这三个变量，逻辑回归没有对应系数，
-    任何权重都只能是编出来的数字。分开呈现，用户和医生都能看清哪部分来自
-    数据拟合、哪部分来自流行病学常识。
+    Why this is not folded into the model: the SINAN notification data does not contain
+    these three variables, the logistic regression has no coefficients for them, and any
+    weight would be nothing but a made-up number. Presented separately, both users and
+    clinicians can see which part comes from fitting data and which part from
+    epidemiological common sense.
     """
     answers = form.exposure
     factors = [c for c in EXPOSURE_CODES if answers.get(c) == "yes"]
@@ -143,7 +161,7 @@ def evaluate_exposure(form: FormInput) -> ExposureContext:
 async def _infer_notes_symptoms(
     form: FormInput, client: DeepSeekClient
 ) -> FormInput:
-    """用 DeepSeek 从备注里补充症状；任何失败都返回原表单。"""
+    """Use DeepSeek to add symptoms from the notes; any failure returns the original form."""
     system, user = build_feature_prompt(form)
     try:
         raw = await client.chat_json(system, user, purpose="features")
@@ -158,7 +176,7 @@ async def _infer_notes_symptoms(
     updated = dict(form.symptoms)
     applied: list[str] = []
     for code, value in infer.items():
-        # 只允许把「尚未作答」提升为「有」，绝不推翻用户明确的回答
+        # Only lift "not yet answered" to "yes"; never overturn an explicit user answer
         if code in SYMPTOM_CODES and value == "yes" and updated.get(code) == "unknown":
             updated[code] = "yes"
             applied.append(code)
@@ -170,17 +188,19 @@ async def _infer_notes_symptoms(
 
 
 def _parse_advice(raw: dict, language: str) -> tuple[Advice, str]:
-    """把模型返回的 JSON 解析成 (Advice, summary)。结构不合法就抛 DeepSeekError。"""
+    """Parse the model's JSON into (Advice, summary). Raises DeepSeekError if malformed."""
     try:
         advice = Advice.model_validate(raw.get("advice", {}))
-    except Exception as exc:  # pydantic ValidationError 及结构异常
+    except Exception as exc:  # pydantic ValidationError and other structural failures
         raise DeepSeekError("DeepSeek 建议生成结果不符合要求") from exc
     summary = str(raw.get("summary", "")).strip() or _FALLBACK_SUMMARY[language]
     return advice, summary
 
 
 def _template_advice(language: str, tier: str) -> tuple[Advice, str]:
-    """兜底：与 MOCK 演示共用同一份分档模板（deepseek_client.fallback_advice）。"""
+    """Fallback: shares the same per-band template as the MOCK demo
+    (deepseek_client.fallback_advice).
+    """
     raw = fallback_advice(language, tier)
     return Advice.model_validate(raw["advice"]), raw["summary"]
 
@@ -203,12 +223,16 @@ async def _produce_advice(
     client: DeepSeekClient,
     settings,
 ) -> tuple[Advice, str, str]:
-    """生成建议并保证它通过输出校验。返回 (advice, summary, advice_source)。
+    """Generate advice and make sure it passes output verification.
 
-    真实模式：生成 -> 校验 -> 带违规说明重问一次 -> 再校验 -> 仍不过就退回模板。
-    MOCK 模式：直接用模板，但**照样跑一遍校验**——校验是纯规则、零成本，
-    而模板正是真实模式失败时要端给用户的东西，它必须永远是干净的。
-    这条路径由 tests 里「5 语言 × 3 档位 × 0 违规」那条测试守着。
+    Returns (advice, summary, advice_source).
+
+    Real mode: generate -> verify -> re-ask once with the violations spelled out ->
+    verify again -> fall back to the template if it still does not pass.
+    MOCK mode: use the template directly, but **run the verification all the same** --
+    the checks are pure rules and cost nothing, and the template is exactly what gets
+    served to the user when real mode fails, so it must always be clean.
+    This path is guarded by the "5 languages × 3 bands × 0 violations" test in tests.
     """
     language = form.language
     adv_system, adv_user = build_advice_prompt(
@@ -221,7 +245,7 @@ async def _produce_advice(
         )
         advice, summary = _parse_advice(raw, language)
         violations = verify_advice(advice, summary, language, tier, warning_signs)
-        if violations:  # 不该发生：模板文案有问题，要在日志里吼出来
+        if violations:  # Should not happen: broken template copy, shout about it in the log
             _log_violations("MOCK 模板建议", violations)
         return advice, summary, "template"
 
@@ -240,7 +264,7 @@ async def _produce_advice(
         if not violations:
             return advice, summary, "llm"
         _log_violations(f"建议生成第 {attempt + 1} 次", violations)
-        # 把违规说明拼回提示词，让模型只改这些地方
+        # Splice the violations back into the prompt so the model only fixes those spots
         user_prompt = adv_user + "\n\n" + format_violations(violations, as_json=True)
 
     logger.warning("建议退回模板文案（language=%s, tier=%s）", language, tier)
@@ -249,13 +273,16 @@ async def _produce_advice(
 
 
 async def run_assessment(form: FormInput) -> AssessmentResult:
-    """完整评估流程，任何一步失败都会抛出异常，由上层路由转成 HTTP 错误。"""
+    """Full assessment flow.
+
+    A failure at any step raises, and the route above turns it into an HTTP error.
+    """
     settings = get_settings()
     client = DeepSeekClient()
     t0 = time.perf_counter()
 
-    # ---- 步骤 1：确定性特征编码 ----
-    # 有备注且非 MOCK 时，先让 DeepSeek 从备注里补充症状
+    # ---- Step 1: deterministic feature encoding ----
+    # When there are notes and we are not in MOCK, let DeepSeek add symptoms from them first
     if form.notes.strip() and not settings.mock_mode:
         form = await _infer_notes_symptoms(form, client)
     features = encode_features(form)
@@ -266,17 +293,19 @@ async def run_assessment(form: FormInput) -> AssessmentResult:
         epi_week,
     )
 
-    # WHO 警示征象：规则判断，独立于模型评分（见 schemas.WARNING_SIGN_CODES）
+    # WHO warning signs: a rule-based judgement, independent of the model scores
+    # (see schemas.WARNING_SIGN_CODES)
     warning_signs = [c for c in WARNING_SIGN_CODES if form.symptoms.get(c) == "yes"]
     if warning_signs:
         logger.info("用户报告 WHO 警示征象：%s", warning_signs)
 
-    # 流行病学暴露：同样是规则判断，不进入特征向量（见 evaluate_exposure）
+    # Epidemiological exposure: also a rule-based judgement, and it does not enter the
+    # feature vector (see evaluate_exposure)
     exposure = evaluate_exposure(form)
     if exposure.factors:
         logger.info("流行病学暴露：level=%s factors=%s", exposure.level, exposure.factors)
 
-    # ---- 步骤 2：三个模型打分 ----
+    # ---- Step 2: score with the three models ----
     t1 = time.perf_counter()
     model = get_model()
     scores = model.score_all(features)
@@ -291,7 +320,7 @@ async def run_assessment(form: FormInput) -> AssessmentResult:
         tier,
     )
 
-    # ---- 步骤 3：DeepSeek 生成建议（生成 -> 校验 -> 重问 -> 兜底） ----
+    # ---- Step 3: DeepSeek advice generation (generate -> verify -> re-ask -> fallback) ----
     t2 = time.perf_counter()
     advice, summary, advice_source = await _produce_advice(
         form, scores, epi_week, warning_signs, exposure, tier, client, settings
@@ -302,7 +331,7 @@ async def run_assessment(form: FormInput) -> AssessmentResult:
         advice_source,
     )
 
-    # ---- 步骤 4：组装结果 ----
+    # ---- Step 4: assemble the result ----
     result = AssessmentResult(
         dengue=scores["A"],
         worsening=scores["B"],
@@ -324,10 +353,12 @@ async def run_assessment(form: FormInput) -> AssessmentResult:
 
 
 def _make_tool_executor(collected: list[dict]):
-    """构造注入给客户端的工具执行器。
+    """Build the tool executor that gets injected into the client.
 
-    客户端只知道「有个可调用的函数」，工具到底查什么、参数怎么清洗、结果往哪存，
-    全在这里——传输层与领域逻辑分开，客户端才能被独立测试。
+    The client only knows that "there is a function it can call"; what the tool actually
+    looks up, how the arguments are sanitised and where the results are stored all live
+    here -- keeping the transport layer apart from the domain logic is what makes the
+    client independently testable.
     """
 
     def execute(name: str, args: dict) -> dict:
@@ -343,7 +374,7 @@ def _make_tool_executor(collected: list[dict]):
 
 
 def _sources_from(tool_results: list[dict]) -> list[Source]:
-    """把工具结果里的 WHO 通报收成引用列表（按 url 去重，保持顺序）。"""
+    """Gather WHO notices from the tool results into sources (deduped by url, order kept)."""
     sources: list[Source] = []
     seen: set[str] = set()
     for entry in tool_results:
@@ -361,7 +392,7 @@ def _sources_from(tool_results: list[dict]) -> list[Source]:
                     date=str(notice.get("date", "")),
                     url=url,
                     origin="who",
-                    authority="official",  # WHO 通报按定义就是官方来源
+                    authority="official",  # a WHO notice is an official source by definition
                 )
             )
     return sources
@@ -370,15 +401,19 @@ def _sources_from(tool_results: list[dict]) -> list[Source]:
 async def _run_chat_with_search(
     req: ChatRequest, location: str, t0: float
 ) -> ChatResponse:
-    """追问对话的**检索版**：问题里出现了地点，就联网查最近三个月的情况。
+    """**Search version** of the follow-up conversation: when a location shows up in the
+    question, go online for the situation over the last three months.
 
-    与函数工具那条路的差别不只是「多了检索」：这里**不给模型任何函数工具**。
-    地区背景（endemicity / 季节 / WHO 通报）由我们自己查好摆进提示词——
-    那次查询是本地表 + 一个 12 小时缓存的公开接口，几乎不花钱，却能给检索
-    一个可核对的地基，也顺带把 WHO 的链接加进本轮的引用白名单。
+    The difference from the function-tool path is not just "search has been added": here
+    the model gets **no function tools at all**. The regional background (endemicity /
+    season / WHO notices) is looked up by us and placed into the prompt -- that lookup is
+    a local table plus a public endpoint cached for 12 hours, costs next to nothing, and
+    yet gives the search a checkable foundation while also adding the WHO links to this
+    round's citation allow-list.
 
-    白名单因此是**两层的并集**：WHO 工具返回的链接 + 检索真正返回的链接。
-    回复里出现任何第三种链接，仍然是 fabricated_url，仍然重问一次再兜底。
+    The allow-list is therefore the **union of two layers**: the links returned by the WHO
+    tool plus the links the search really returned. Any third kind of link appearing in
+    the reply is still fabricated_url, still gets one re-ask and then the fallback.
     """
     settings = get_settings()
     intel_result = lookup_dengue_context(location)
@@ -429,7 +464,7 @@ async def _run_chat_with_search(
             {"role": "assistant", "content": reply},
             {"role": "user", "content": format_violations(violations, as_json=False)},
         ]
-        # 重写措辞不需要再检索一遍：事实已经在上一轮的结果里
+        # Rewording needs no second search: the facts are already in the previous round
         max_uses = 0
 
     logger.warning(
@@ -443,23 +478,30 @@ async def _run_chat_with_search(
 
 
 async def run_chat(req: ChatRequest) -> ChatResponse:
-    """追问对话：无状态，上下文与历史全部由前端回传。
+    """Follow-up conversation: stateless, context and history all posted back by the front end.
 
-    **两条路，由「问题里有没有地点」决定**（见 _run_chat_with_search）：
+    **Two paths, decided by "is there a location in the question"** (see
+    _run_chat_with_search):
 
-      有地点 + SEARCH_ENABLED —— 走联网检索，回答里能带最近三个月的情况；
-      其余情况               —— 走原来的 OpenAI 函数调用路径，**一分钱检索费都不花**。
+      location + SEARCH_ENABLED -- use web search, so the answer can carry the situation
+                                   over the last three months;
+      everything else           -- use the original OpenAI function-calling path, which
+                                   **spends not a cent on search**.
 
-    这条分流是有意的成本控制。检索按次计费且次数由模型决定（实测一个普通问题
-    触发了 4 次检索、约 13.9k 输入 token），而「我的分数是什么意思」这类问题
-    根本不需要联网。地点识别用的是本地别名表（app.intel.find_location），
-    零成本、支持中西葡三语写法。
+    This split is deliberate cost control. Search is billed per call and the number of
+    calls is decided by the model (measured: one ordinary question triggered 4 searches
+    and about 13.9k input tokens), whereas a question like "what does my score mean"
+    needs no web access at all. Location recognition uses a local alias table
+    (app.intel.find_location): zero cost, and it accepts Chinese, Spanish and Portuguese
+    spellings.
 
-    两条路的出口是同一道闸门：回复在返回前都要过 verify_chat_reply，
-    allowed_urls **只包含这一轮真正取回过的**链接。校验不过就带违规说明重问一次，
-    还不过就换成本地化的兜底句。
+    Both paths leave through the same gate: every reply passes verify_chat_reply before
+    it is returned, and allowed_urls contains **only the links actually fetched in this
+    round**. If verification fails we re-ask once with the violations spelled out; if it
+    fails again we switch to the localised fallback sentence.
 
-    失败（DeepSeekError）向上抛出，由路由转成 502——聊天没有别的东西可退。
+    Failures (DeepSeekError) propagate upward and the route turns them into a 502 -- chat
+    has nothing else to fall back on.
     """
     t0 = time.perf_counter()
     tier = overall_tier(
@@ -469,8 +511,10 @@ async def run_chat(req: ChatRequest) -> ChatResponse:
             if block is not None
         ]
     )
-    # 地点识别只看用户原文（本轮问题 + 最近几条历史）——不能把整个提示词丢进去，
-    # 里面的语言名（「葡萄牙语」「西班牙语」）会被当成地名命中。
+    # Location recognition looks only at the user's own text (this round's question + the
+    # last few history entries) -- we must not throw the whole prompt in: the language
+    # names inside it ("葡萄牙语" contains 葡萄牙/Portugal, "西班牙语" contains 西班牙/Spain)
+    # would be matched as place names.
     probe = "\n".join([*(m.content for m in req.history), req.question])
     location = find_location(probe)
     settings = get_settings()

@@ -1,38 +1,46 @@
-"""自适应问诊规划器：决定下一个该问什么，并证明什么时候可以安全停止。
+"""Adaptive questioning planner: decides what to ask next, and proves when it is safe to stop.
 
-== 原理（完全确定性，无 LLM）==
+== How it works (fully deterministic, no LLM) ==
 
-三个逻辑回归模型的系数是完全已知的，因此对一份**部分作答**的问卷，
-可以对每个模型算出最终分数的**硬边界**：
+The coefficients of the three logistic regression models are completely known, so for a
+**partially answered** questionnaire the final score of each model can be given **hard
+bounds**:
 
-- 已作答的二值题贡献是确定的：yes -> coef，no / unknown -> 0
-  （与 SINAN 特征工程一致，见 ml_model 模块文档）；
-- 一道**还没问**的二值题，最终贡献只可能是 0 或它的系数，于是
+- the contribution of an answered binary question is certain: yes -> coef,
+  no / unknown -> 0 (matching the SINAN feature engineering, see the ml_model module
+  docstring);
+- a binary question that has **not been asked yet** can only ever contribute 0 or its own
+  coefficient, hence
 
       z_min = z_answered + Σ min(0, c_f)
-      z_max = z_answered + Σ max(0, c_f)        （f 取遍未问特征）
+      z_max = z_answered + Σ max(0, c_f)        (f ranges over the unasked features)
 
-- age / sex / day_ill 是问卷第一步的必填项，季节项由服务器按当日计算，
-  两者都不带来不确定性；
-- 把 z_min / z_max 送进与 score_one **完全相同**的参考人归一化
-  （ml_model.score_from_z，裁剪到 [0, 100]），得到 [score_min, score_max]。
+- age / sex / day_ill are required in the first step of the questionnaire, and the seasonal
+  terms are computed by the server from the current date, so neither adds any uncertainty;
+- feeding z_min / z_max through **exactly the same** reference-person normalisation as
+  score_one (ml_model.score_from_z, clipped to [0, 100]) gives [score_min, score_max].
 
-若三个模型的区间都落在同一个风险档位内（_level(score_min) == _level(score_max)），
-则剩余问题**无论怎么回答**都改变不了任何模型的档位——可证明地安全停止。
+If all three models' intervals fall inside one risk band
+(_level(score_min) == _level(score_max)), then **however they are answered** the remaining
+questions cannot change any model's band -- a provably safe stop.
 
-关键区分：用户答了「不知道」是确定的 0（已作答）；「还没问」才是不确定。
-PlanRequest 用键的存在与否区分这两种状态（见 schemas.PlanRequest 的说明）。
+The key distinction: a user answering "don't know" is a certain 0 (answered); only "not yet
+asked" is uncertain. PlanRequest tells the two states apart by whether the key is present
+(see the notes on schemas.PlanRequest).
 
-== 信息价值 ==
+== Information value ==
 
-系数本身就定义了每道题的信息量。对未问特征 f：
+The coefficients themselves define how much information each question carries. For an
+unasked feature f:
 
-    impact(f) = Σ_{未定模型 m} |c_f^m| / (z_ceil^m − z_ref^m)
+    impact(f) = Σ_{undecided models m} |c_f^m| / (z_ceil^m − z_ref^m)
 
-除以各模型自己的归一化跨度，三个模型的系数才可以互相比较、相加。
-why_model 取归一化 |系数| 最大的那个未定模型——前端用它解释
-「这道题主要在帮哪条估计收窄」。排序完全确定：先按 impact 降序，
-平手按 FEATS 顺序（症状在前、合并症在后，各自按训练脚本的次序）。
+Dividing by each model's own normalisation span is what makes the three models'
+coefficients comparable and addable. why_model takes the undecided model with the largest
+normalised |coefficient| -- the front end uses it to explain "which estimate is this
+question mainly helping to narrow". The ordering is fully determined: impact descending
+first, ties broken by FEATS order (symptoms first, comorbidities after, each in the order
+used by the training script).
 """
 
 import math
@@ -60,19 +68,20 @@ from app.schemas import (
     PlanResponse,
 )
 
-# 规划器管理的全部问题：(kind, code)，顺序 = FEATS 顺序（先症状后合并症）
+# Every question the planner manages: (kind, code), in FEATS order
+# (symptoms first, comorbidities after)
 QUESTIONS: tuple[tuple[str, str], ...] = tuple(
     [("symptom", code) for code in SYMPTOM_CODES]
     + [("comorbidity", code) for code in COMORB_CODES]
 )
 QUESTION_COUNT = len(QUESTIONS)  # 21
 
-# next 列表最多返回几条建议
+# How many suggestions the next list returns at most
 NEXT_MAX = 5
 
 
 def _seasonal(ref_date: date | None) -> tuple[float, float]:
-    """当日的季节项（与 encode_features 完全相同的公式）。"""
+    """Seasonal terms for the current date (exactly the same formula as encode_features)."""
     week = get_epi_week(ref_date)
     return (
         math.sin(2 * math.pi * week / 52),
@@ -81,10 +90,11 @@ def _seasonal(ref_date: date | None) -> tuple[float, float]:
 
 
 def _answered_values(req: PlanRequest, wk_sin: float, wk_cos: float) -> dict[str, float]:
-    """当前已知的 26 维特征值：yes -> 1，no / unknown / 未问 -> 0。
+    """The 26 feature values known so far: yes -> 1, no / unknown / not asked -> 0.
 
-    「未问按 0 计」正是 score_now 的定义——用户此刻停止作答，
-    缺失键会被 FormInput 补成 unknown，编码为 0，得到的就是这个分数。
+    "Not asked counts as 0" is exactly the definition of score_now -- if the user stops
+    answering right now, FormInput fills the missing keys in as unknown, they encode to 0,
+    and this is the score that comes out.
     """
     values: dict[str, float] = {}
     for code in SYMPTOM_CODES:
@@ -100,7 +110,7 @@ def _answered_values(req: PlanRequest, wk_sin: float, wk_cos: float) -> dict[str
 
 
 def _unasked_feats(req: PlanRequest) -> list[str]:
-    """还没问的二值特征名（键缺失 = 未问；已答 unknown 不在其列）。"""
+    """Binary features not yet asked (missing key = not asked; an answered unknown is not)."""
     feats = [f"{c}_x" for c in SYMPTOM_CODES if c not in req.symptoms]
     feats += [f"{c}_x" for c in COMORB_CODES if c not in req.comorbidities]
     return feats
@@ -113,10 +123,10 @@ def _model_bounds(
     wk_sin: float,
     wk_cos: float,
 ) -> ModelBounds:
-    """单个模型的 [score_min, score_max] 硬边界与当前分。
+    """Hard [score_min, score_max] bounds and the current score for one model.
 
-    z 的求和顺序与 score_one 逐项一致（按 FEATS 遍历），
-    保证 score_now 与 /api/assess 的分数在浮点意义上也完全相同。
+    The summation order for z matches score_one term by term (iterating over FEATS), which
+    keeps score_now identical to the /api/assess score even in the floating-point sense.
     """
     z_now = sum(coef.get(name, 0.0) * values[name] for name in FEATS)
     z_min = z_now + sum(min(0.0, coef.get(f, 0.0)) for f in unasked)
@@ -141,10 +151,11 @@ def _rank_next(
     wk_sin: float,
     wk_cos: float,
 ) -> list[NextQuestion]:
-    """未问问题按信息价值排序，取前 NEXT_MAX 条。
+    """Rank the unasked questions by information value and take the top NEXT_MAX.
 
-    impact(f) = Σ_{未定模型} |coef| / 归一化跨度；对所有未定模型都零影响的
-    问题直接跳过——问它不可能改变任何还悬而未决的档位。
+    impact(f) = Σ_{undecided models} |coef| / normalisation span; a question with zero
+    impact on every undecided model is skipped outright -- asking it cannot possibly change
+    any band that is still open.
     """
     spans: dict[str, float] = {}
     for key in undecided:
@@ -160,7 +171,7 @@ def _rank_next(
         impact = 0.0
         best_key: str | None = None
         best_value = 0.0
-        for key in undecided:  # MODEL_KEYS 顺序；why_model 平手取靠前的模型
+        for key in undecided:  # MODEL_KEYS order; on a tie why_model takes the earlier model
             span = spans[key]
             if span <= 0:
                 continue
@@ -179,7 +190,7 @@ def _rank_next(
             )
         )
 
-    # 确定性排序：impact 降序，平手按 FEATS 顺序
+    # Deterministic ordering: impact descending, ties by FEATS order
     ranked.sort(key=lambda item: (item[0], item[1]))
     return [question for _, _, question in ranked[:NEXT_MAX]]
 
@@ -189,9 +200,10 @@ def plan(
     ref_date: date | None = None,
     model: DengueModel | None = None,
 ) -> PlanResponse:
-    """核心入口：边界 -> 是否可停 -> 下一步问题。纯函数，无副作用。
+    """Core entry point: bounds -> can we stop -> next questions. Pure, no side effects.
 
-    ref_date / model 仅供测试注入；生产路径用当日日期与进程内单例模型。
+    ref_date / model exist only for test injection; the production path uses the current
+    date and the in-process singleton model.
     """
     model = model if model is not None else get_model()
     wk_sin, wk_cos = _seasonal(ref_date)
@@ -211,7 +223,7 @@ def plan(
     return PlanResponse(
         bounds=PlanBounds(**bounds),
         can_stop=can_stop,
-        # 全部定档后不再有值得问的问题——即便还剩很多没问
+        # Once every band is settled, no question is worth asking -- however many remain
         next=[] if can_stop else _rank_next(model, req, undecided, wk_sin, wk_cos),
         answered=answered,
         remaining=QUESTION_COUNT - answered,

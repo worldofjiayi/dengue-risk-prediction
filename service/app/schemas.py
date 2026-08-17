@@ -1,100 +1,112 @@
-"""三层数据契约：问卷输入 FormInput -> ML 特征 MLFeatures -> 评估结果 AssessmentResult。
+"""The three-layer data contract: questionnaire input FormInput -> ML features
+MLFeatures -> assessment result AssessmentResult.
 
-特征定义严格对齐登革热风险模型的训练脚本（02_fit_models.py 的 FEATS），
-顺序与命名不可更改，否则推理结果无意义。
+The feature definitions align strictly with the training script of the dengue risk
+model (the FEATS list in 02_fit_models.py); their order and naming must not change,
+or inference results become meaningless.
 
-三态答案（yes/no/unknown）的编码依据：训练数据 SINAN 用 1=有、2=无、9=未知，
-特征工程里只有 "1" 记为 1，因此「无」与「不知道」在模型看来都是 0。
+Rationale for the three-state answer (yes/no/unknown) encoding: the SINAN training
+data uses 1=yes, 2=no, 9=unknown, and the feature engineering step only counts "1"
+as 1 -- so as far as the model is concerned, "no" and "don't know" are both 0.
 
-⚠️ 流行病学暴露问题（EXPOSURE_CODES）**不是模型特征**：SINAN 通报数据里没有
-这三个变量，硬塞进 26 维向量会破坏与训练脚本的一致性。它们只走
-「规则判断」通道，产出独立的 ExposureContext，详见该类的说明。
+Warning: the epidemiological exposure questions (EXPOSURE_CODES) are **not model
+features**. The SINAN notification data does not contain those three variables, and
+forcing them into the 26-dimensional vector would break alignment with the training
+script. They travel down the "rule-based" channel only, producing a separate
+ExposureContext; see that class for details.
 """
 
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-# ---------- 特征定义（与训练脚本一致，顺序不可改） ----------
+# ---------- Feature definitions (identical to the training script; order is fixed) ----------
 
-# 14 个症状
+# 14 symptoms
 SYMPTOM_CODES: tuple[str, ...] = (
-    "FEBRE",       # 发热
-    "MIALGIA",     # 肌痛
-    "CEFALEIA",    # 头痛
-    "EXANTEMA",    # 皮疹
-    "VOMITO",      # 呕吐
-    "NAUSEA",      # 恶心
-    "DOR_COSTAS",  # 背痛
-    "CONJUNTVIT",  # 结膜炎
-    "ARTRITE",     # 关节炎
-    "ARTRALGIA",   # 关节痛
-    "PETEQUIA_N",  # 瘀点（皮肤出血点）
-    "LEUCOPENIA",  # 白细胞减少（重症最强预测因子）
-    "LACO",        # 束臂试验阳性
-    "DOR_RETRO",   # 眼后痛
+    "FEBRE",       # fever
+    "MIALGIA",     # myalgia
+    "CEFALEIA",    # headache
+    "EXANTEMA",    # rash
+    "VOMITO",      # vomiting
+    "NAUSEA",      # nausea
+    "DOR_COSTAS",  # back pain
+    "CONJUNTVIT",  # conjunctivitis
+    "ARTRITE",     # arthritis
+    "ARTRALGIA",   # arthralgia (joint pain)
+    "PETEQUIA_N",  # petechiae (pinpoint skin haemorrhages)
+    "LEUCOPENIA",  # leukopenia (the strongest predictor of severe disease)
+    "LACO",        # positive tourniquet test
+    "DOR_RETRO",   # retro-orbital pain
 )
 
-# 7 个合并症
+# 7 comorbidities
 COMORB_CODES: tuple[str, ...] = (
-    "DIABETES",    # 糖尿病
-    "HEMATOLOG",   # 血液病
-    "HEPATOPAT",   # 肝病
-    "RENAL",       # 肾病
-    "HIPERTENSA",  # 高血压
-    "ACIDO_PEPT",  # 消化性溃疡
-    "AUTO_IMUNE",  # 自身免疫病
+    "DIABETES",    # diabetes
+    "HEMATOLOG",   # haematological disease
+    "HEPATOPAT",   # liver disease
+    "RENAL",       # kidney disease
+    "HIPERTENSA",  # hypertension
+    "ACIDO_PEPT",  # peptic ulcer disease
+    "AUTO_IMUNE",  # autoimmune disease
 )
 
-# 5 个非二值特征（在解释输出里保留原名，不做 _x 剥离）
+# 5 non-binary features (keep their own names in the explanation output; no _x stripping)
 NON_BINARY_FEATS: tuple[str, ...] = ("age", "sex_f", "day_ill", "wk_sin", "wk_cos")
 
-# 26 个特征的完整顺序（= 训练时 FEATS）
+# The complete ordering of the 26 features (= FEATS at training time)
 FEATS: tuple[str, ...] = (
     tuple(f"{c}_x" for c in SYMPTOM_CODES)
     + tuple(f"{c}_x" for c in COMORB_CODES)
     + NON_BINARY_FEATS
 )
 
-# ---------- 流行病学暴露（规则通道，**不是**模型特征） ----------
+# ---------- Epidemiological exposure (rule-based channel, **not** model features) ----------
 #
-# 这三个问题在 SINAN 通报数据里根本不存在，因此无法进入逻辑回归模型：
-# 训练时没见过的变量没有系数，强行加入只会让 26 维向量与训练脚本不再对齐。
-# 但「身边有确诊病例」「去过暴发地区」是登革热问诊中最重要的线索之一，
-# 丢掉它可惜。折中方案是把它们放进一条**独立的规则**（见 pipeline.evaluate_exposure），
-# 与模型评分并列呈现、互不干扰——和 WHO 警示征象采用的是同一种设计。
+# These three questions simply do not exist in the SINAN notification data, so they
+# cannot enter the logistic regression model: a variable never seen during training has
+# no coefficient, and forcing one in would knock the 26-dimensional vector out of
+# alignment with the training script.
+# But "there is a confirmed case around me" and "I have been to an outbreak area" are
+# among the most important clues in a dengue history, and it would be a shame to throw
+# them away. The compromise is to put them behind a **separate rule** (see
+# pipeline.evaluate_exposure), presented alongside the model score without interfering
+# with it -- the same design used for the WHO warning signs.
 EXPOSURE_CODES: tuple[str, ...] = (
-    "FEVER_CLUSTER",    # 周围人群近期发热病例异常增多
-    "CONFIRMED_CASE",   # 身边（家庭 / 工作场所 / 社区）有确诊登革热病例
-    "OUTBREAK_TRAVEL",  # 近期到访或居住于登革热暴发地区
+    "FEVER_CLUSTER",    # an unusual recent rise in fever cases among people nearby
+    "CONFIRMED_CASE",   # a confirmed dengue case close by (household / workplace / community)
+    "OUTBREAK_TRAVEL",  # recently visited or lived in a dengue outbreak area
 )
 
-# 判定为 high 的暴露因素（任一为 yes 即 high）
+# Exposure factors that make the level high (any one of them being yes is enough)
 HIGH_EXPOSURE_CODES: tuple[str, ...] = ("CONFIRMED_CASE", "OUTBREAK_TRAVEL")
-# 判定为 medium 的暴露因素（仅在不满足 high 时生效）
+# Exposure factors that make the level medium (only when high was not reached)
 MEDIUM_EXPOSURE_CODES: tuple[str, ...] = ("FEVER_CLUSTER",)
 
-# ---------- 枚举类型 ----------
+# ---------- Enumerated types ----------
 
 SymptomAnswer = Literal["yes", "no", "unknown"]
 Sex = Literal["F", "M"]
 RiskLevel = Literal["low", "medium", "high"]
 Language = Literal["zh-CN", "zh-TW", "en", "es", "pt"]
 ModelKey = Literal["A", "B", "B2"]
-# 建议文本的来源：真实模型输出（已通过输出校验）还是内置模板兜底
+# Where the advice text came from: real model output (having passed output validation),
+# or the built-in template fallback
 AdviceSource = Literal["llm", "template"]
-# 一条引用来源出自哪一层：WHO 疾病暴发新闻接口，还是模型的联网检索
+# Which layer a cited source came from: the WHO Disease Outbreak News API, or the
+# model's web search
 SourceOrigin = Literal["who", "search"]
 SourceAuthority = Literal["official", "other"]
-# 联网检索这一轮的状态：
-#   ok       —— 检索跑了，并且带回了来源
-#   degraded —— 检索被尝试过，但失败 / 一无所获 / 输出没通过校验（其余各层照常返回）
-#   disabled —— SEARCH_ENABLED=false，压根没打算检索
+# Status of web search for this round:
+#   ok       -- search ran and brought back sources
+#   degraded -- search was attempted but failed / found nothing / the output did not pass
+#               validation (every other layer still returns as usual)
+#   disabled -- SEARCH_ENABLED=false, no search was ever going to be attempted
 SearchStatus = Literal["ok", "degraded", "disabled"]
-# 地区流行程度（与 app/data/dengue_endemicity.json 的取值一致）
+# Regional endemicity level (matching the values in app/data/dengue_endemicity.json)
 Endemicity = Literal["high", "moderate", "low", "none", "unknown"]
 
-# ---------- 五语言固定文案 ----------
+# ---------- Fixed copy in five languages ----------
 
 DISCLAIMERS: dict[str, str] = {
     "zh-CN": "本结果仅供参考，不构成医疗诊断。如有不适请及时就医。",
@@ -113,7 +125,8 @@ DISCLAIMERS: dict[str, str] = {
     ),
 }
 
-# 模型性质说明：相对评分而非概率（无截距 + 下采样训练，尚未本地校准）
+# A note on what the model is: a relative score rather than a probability (no intercept
+# plus downsampled training, and not yet calibrated locally)
 MODEL_NOTES: dict[str, str] = {
     "zh-CN": (
         "评分为相对风险参考值，非感染概率。模型基于巴西 SINAN 2023–2025 年"
@@ -140,10 +153,10 @@ MODEL_NOTES: dict[str, str] = {
     ),
 }
 
-# 默认（简体中文）文案
+# Default copy (Simplified Chinese)
 DISCLAIMER = DISCLAIMERS["zh-CN"]
 
-# 上游模型不可用时返回给用户的提示（HTTP 502）
+# Message returned to the user when the upstream model is unavailable (HTTP 502)
 UPSTREAM_ERRORS: dict[str, str] = {
     "zh-CN": "上游模型服务暂时不可用，请稍后重试。",
     "zh-TW": "上游模型服務暫時無法使用，請稍後重試。",
@@ -152,7 +165,7 @@ UPSTREAM_ERRORS: dict[str, str] = {
     "pt": "O serviço do modelo está temporariamente indisponível. Tente novamente em instantes.",
 }
 
-# 服务端内部错误提示（HTTP 500）
+# Internal server error message (HTTP 500)
 SERVER_ERRORS: dict[str, str] = {
     "zh-CN": "服务器内部错误，请稍后重试。",
     "zh-TW": "伺服器內部錯誤，請稍後重試。",
@@ -161,44 +174,48 @@ SERVER_ERRORS: dict[str, str] = {
     "pt": "Erro interno do servidor. Tente novamente mais tarde.",
 }
 
-# WHO 登革热警示征象（Guidelines for Diagnosis, Treatment, Prevention and Control, 2009）
-# 中能被本问卷覆盖的项。这是**独立于模型的规则判断**：
-# 模型 B/B2 由白细胞减少主导，未验血的患者即便已出现警示征象也可能得低分，
-# 因此必须并列给出规则提示，避免用户被错误安抚。
+# The WHO dengue warning signs (Guidelines for Diagnosis, Treatment, Prevention and
+# Control, 2009) that this questionnaire is able to cover. This is a **rule-based check
+# independent of the model**: models B/B2 are dominated by leukopenia, so a patient who
+# has not had blood work done can score low even when warning signs are already present.
+# The rule-based alert must therefore be shown alongside the score, so that users are
+# not falsely reassured.
 WARNING_SIGN_CODES: tuple[str, ...] = (
-    "VOMITO",      # 持续呕吐
-    "PETEQUIA_N",  # 皮肤黏膜出血表现
+    "VOMITO",      # persistent vomiting
+    "PETEQUIA_N",  # mucosal / skin bleeding
 )
 
 
 class FormInput(BaseModel):
-    """POST /api/assess 请求体：登革热风险自评问卷。"""
+    """POST /api/assess request body: the dengue risk self-assessment questionnaire."""
 
-    age: int = Field(..., ge=0, le=110, description="年龄（岁）")
-    sex: Sex = Field(..., description="生理性别，F 女 / M 男")
-    day_ill: int = Field(..., ge=0, le=14, description="症状开始至今的天数")
-    # validate_default=True：整个字段缺席时也要跑补全校验器，
-    # 否则 form.symptoms 会是空 dict，下游按代码取值就会 KeyError。
+    age: int = Field(..., ge=0, le=110, description="age (years)")
+    sex: Sex = Field(..., description="sex at birth, F female / M male")
+    day_ill: int = Field(..., ge=0, le=14, description="days since symptom onset")
+    # validate_default=True: the fill-in validator must run even when the whole field is
+    # absent, otherwise form.symptoms would be an empty dict and downstream lookups by
+    # code would raise KeyError.
     symptoms: dict[str, SymptomAnswer] = Field(
         default_factory=dict,
         validate_default=True,
-        description="14 项症状，缺失的键按 unknown 处理",
+        description="the 14 symptoms; missing keys are treated as unknown",
     )
     comorbidities: dict[str, SymptomAnswer] = Field(
         default_factory=dict,
         validate_default=True,
-        description="7 项合并症，缺失的键按 unknown 处理",
+        description="the 7 comorbidities; missing keys are treated as unknown",
     )
     exposure: dict[str, SymptomAnswer] = Field(
         default_factory=dict,
         validate_default=True,
         description=(
-            "3 项流行病学暴露问题，缺失的键按 unknown 处理。"
-            "**不参与模型打分**，只用于规则化的 exposure_context。"
+            "the 3 epidemiological exposure questions; missing keys are treated as "
+            "unknown. **Takes no part in model scoring**, and is only used for the "
+            "rule-based exposure_context."
         ),
     )
-    language: Language = Field(default="zh-CN", description="输出语言（BCP 47）")
-    notes: str = Field(default="", max_length=500, description="可选自由文本补充说明")
+    language: Language = Field(default="zh-CN", description="output language (BCP 47)")
+    notes: str = Field(default="", max_length=500, description="optional free-text notes")
 
     @field_validator("symptoms")
     @classmethod
@@ -217,16 +234,17 @@ class FormInput(BaseModel):
 
 
 def _fill_answers(value: dict, codes: tuple[str, ...], field: str) -> dict:
-    """补全缺失的键为 unknown；出现契约外的键则报错。"""
+    """Fill missing keys in as unknown; raise on any key outside the contract."""
     _require_known_keys(value, codes, field)
     return {code: value.get(code, "unknown") for code in codes}
 
 
 def _require_known_keys(value: dict, codes: tuple[str, ...], field: str) -> dict:
-    """只校验键在契约内，**不补全缺失键**。
+    """Only validate that keys are within the contract; **do not fill missing keys in**.
 
-    /api/plan 的语义是「键存在 = 已作答，键缺失 = 还没问」，
-    缺失本身就是信号，绝不能像 FormInput 那样补成 unknown。
+    The semantics of /api/plan are "key present = answered, key absent = not asked yet",
+    so absence is itself the signal and must never be filled in as unknown the way
+    FormInput does.
     """
     unknown_keys = set(value) - set(codes)
     if unknown_keys:
@@ -235,9 +253,9 @@ def _require_known_keys(value: dict, codes: tuple[str, ...], field: str) -> dict
 
 
 class MLFeatures(BaseModel):
-    """26 个模型输入特征。二值项 0/1，其余为连续值。"""
+    """The 26 model input features. Binary items are 0/1; the rest are continuous."""
 
-    # 14 个症状
+    # 14 symptoms
     FEBRE_x: int = Field(..., ge=0, le=1)
     MIALGIA_x: int = Field(..., ge=0, le=1)
     CEFALEIA_x: int = Field(..., ge=0, le=1)
@@ -252,7 +270,7 @@ class MLFeatures(BaseModel):
     LEUCOPENIA_x: int = Field(..., ge=0, le=1)
     LACO_x: int = Field(..., ge=0, le=1)
     DOR_RETRO_x: int = Field(..., ge=0, le=1)
-    # 7 个合并症
+    # 7 comorbidities
     DIABETES_x: int = Field(..., ge=0, le=1)
     HEMATOLOG_x: int = Field(..., ge=0, le=1)
     HEPATOPAT_x: int = Field(..., ge=0, le=1)
@@ -260,7 +278,7 @@ class MLFeatures(BaseModel):
     HIPERTENSA_x: int = Field(..., ge=0, le=1)
     ACIDO_PEPT_x: int = Field(..., ge=0, le=1)
     AUTO_IMUNE_x: int = Field(..., ge=0, le=1)
-    # 连续 / 其他
+    # continuous / other
     age: float = Field(..., ge=0.0, le=110.0)
     sex_f: float = Field(..., ge=0.0, le=1.0)
     day_ill: float = Field(..., ge=0.0, le=14.0)
@@ -268,30 +286,32 @@ class MLFeatures(BaseModel):
     wk_cos: float = Field(..., ge=-1.0, le=1.0)
 
     def as_vector(self) -> list[float]:
-        """按 FEATS 顺序展开为特征向量（供外部模型使用）。"""
+        """Expand into a feature vector in FEATS order (for use by an external model)."""
         data = self.model_dump()
         return [float(data[name]) for name in FEATS]
 
 
 class ModelScore(BaseModel):
-    """单个模型的输出：相对风险评分。"""
+    """Output of a single model: a relative risk score."""
 
-    score: float = Field(..., ge=0.0, le=100.0, description="0-100 相对评分")
+    score: float = Field(..., ge=0.0, le=100.0, description="0-100 relative score")
     level: RiskLevel
-    z: float = Field(..., description="线性预测值（无截距）")
+    z: float = Field(..., description="linear predictor (no intercept)")
 
 
 class ExposureContext(BaseModel):
-    """流行病学暴露背景：**规则判断结果，不来自任何模型**。
+    """Epidemiological exposure context: **the result of a rule, not of any model**.
 
-    level：
-        high   —— CONFIRMED_CASE 或 OUTBREAK_TRAVEL 为 yes
-        medium —— FEVER_CLUSTER 为 yes 且未达 high
-        low    —— 其余情况（含全部「不知道」）
-    factors：回答为 yes 的暴露代码，供前端查表显示本地化标签。
+    level:
+        high   -- CONFIRMED_CASE or OUTBREAK_TRAVEL is yes
+        medium -- FEVER_CLUSTER is yes and high was not reached
+        low    -- everything else (including all-"don't know")
+    factors: the exposure codes answered yes, for the front end to look up and display
+    localised labels.
 
-    之所以不并入模型评分：这三个变量在 SINAN 训练数据中不存在，
-    没有系数可用，任何加权都会是拍脑袋的数字。分开呈现才诚实。
+    Why this is not folded into the model score: these three variables do not exist in
+    the SINAN training data, so there is no coefficient to use, and any weighting would
+    be a number pulled out of thin air. Presenting them separately is the honest option.
     """
 
     level: RiskLevel
@@ -299,22 +319,28 @@ class ExposureContext(BaseModel):
 
 
 class FeatureContribution(BaseModel):
-    """单个特征对某模型线性预测值 z 的贡献（coef × 特征值）。"""
+    """One feature's contribution to a model's linear predictor z (coef × feature value)."""
 
-    feature: str = Field(..., description="FEATS 中的特征名，如 FEBRE_x")
+    feature: str = Field(..., description="feature name from FEATS, e.g. FEBRE_x")
     code: str = Field(
         ...,
-        description="供前端查表的标签键：症状/合并症去掉 _x 后缀，5 个非二值特征用原名",
+        description=(
+            "label key for the front end to look up: symptoms/comorbidities drop the _x "
+            "suffix, the 5 non-binary features keep their own names"
+        ),
     )
-    contribution: float = Field(..., description="coef × 特征值，保留 4 位小数")
-    direction: Literal["up", "down"] = Field(..., description="推高（up）还是拉低（down）")
+    contribution: float = Field(..., description="coef × feature value, to 4 decimal places")
+    direction: Literal["up", "down"] = Field(..., description="pushes the score up or down")
 
 
 class Advice(BaseModel):
-    """三类建议，均为目标语言（FormInput.language）字符串列表。
+    """Three kinds of advice, each a list of strings in the target language
+    (FormInput.language).
 
-    字段顺序即前端展示顺序：**就医优先**，其次居家监测，最后日常防护。
-    Pydantic 按字段声明顺序序列化，改动此处会直接改变响应 JSON 的键顺序。
+    Field order is display order in the front end: **seeking care comes first**, then
+    home monitoring, then day-to-day protection. Pydantic serialises in field
+    declaration order, so changing this directly changes the key order of the response
+    JSON.
     """
 
     medical: list[str]
@@ -323,54 +349,62 @@ class Advice(BaseModel):
 
 
 class AssessmentResult(BaseModel):
-    """POST /api/assess 响应体。"""
+    """POST /api/assess response body."""
 
-    dengue: ModelScore      # 模型 A：是否登革热
-    worsening: ModelScore   # 模型 B：是否加重（警示+重症 vs 普通）
-    severe: ModelScore      # 模型 B2：是否重症
-    epi_week: int = Field(..., ge=1, le=52, description="评估当日的流行病学周")
+    dengue: ModelScore      # model A: dengue or not
+    worsening: ModelScore   # model B: worsening or not (warning + severe vs ordinary)
+    severe: ModelScore      # model B2: severe or not
+    epi_week: int = Field(..., ge=1, le=52, description="epidemiological week of the assessment date")
     warning_signs: list[str] = Field(
         default_factory=list,
-        description="用户报告的 WHO 登革热警示征象代码（规则判断，独立于模型评分）",
+        description=(
+            "WHO dengue warning-sign codes reported by the user (rule-based, "
+            "independent of the model score)"
+        ),
     )
     exposure_context: ExposureContext = Field(
         ...,
-        description="流行病学暴露背景（规则判断，独立于模型评分）",
+        description="epidemiological exposure context (rule-based, independent of the model score)",
     )
     summary: str
     advice: Advice
     explanations: dict[str, list[FeatureContribution]] = Field(
         default_factory=dict,
-        description="每个模型 z 的前 5 大贡献项，键为 dengue / worsening / severe",
+        description="top 5 contributions to each model's z, keyed by dengue / worsening / severe",
     )
     disclaimer: str = DISCLAIMER
     model_note: str = MODEL_NOTES["zh-CN"]
     advice_source: AdviceSource = Field(
         default="template",
         description=(
-            "这段建议是谁写的：llm = 真实模型生成且通过了输出校验；"
-            "template = 内置模板（演示模式，或模型失败/两次都没通过校验后的兜底）。"
-            "评分与规则判断在两种情况下都是真实计算的，只有自然语言部分不同。"
+            "who wrote this advice: llm = generated by the real model and passed output "
+            "validation; template = the built-in template (demo mode, or the fallback "
+            "after the model failed or failed validation twice). The scores and the "
+            "rule-based checks are genuinely computed in both cases; only the natural "
+            "language part differs."
         ),
     )
 
 
-# ---------- 追问对话（POST /api/chat） ----------
+# ---------- Follow-up chat (POST /api/chat) ----------
 
-# 历史消息上限：只保留最近 N 条，超出部分静默截断（比 422 更友好）
+# History message cap: keep only the most recent N, silently truncating the rest
+# (friendlier than a 422)
 CHAT_HISTORY_MAX = 6
 CHAT_QUESTION_MAX = 500
 
 
 class ChatScore(BaseModel):
-    """前端回传的单模型评分（AssessmentResult.ModelScore 的精简版）。"""
+    """A single model's score echoed back by the front end (a trimmed-down
+    AssessmentResult.ModelScore)."""
 
     score: float = Field(..., ge=0.0, le=100.0)
     level: RiskLevel
 
 
 class ChatContext(BaseModel):
-    """用户自己那份评估结果的快照。服务端无状态，全部由前端回传。"""
+    """A snapshot of the user's own assessment result. The server is stateless, so the
+    front end echoes all of it back."""
 
     dengue: ChatScore | None = None
     worsening: ChatScore | None = None
@@ -400,14 +434,14 @@ class ChatContext(BaseModel):
 
 
 class ChatMessage(BaseModel):
-    """一轮历史消息。"""
+    """One turn of message history."""
 
     role: Literal["user", "assistant"]
     content: str = Field(..., min_length=1, max_length=2000)
 
 
 class ChatRequest(BaseModel):
-    """POST /api/chat 请求体。"""
+    """POST /api/chat request body."""
 
     language: Language = "zh-CN"
     question: str = Field(..., min_length=1, max_length=CHAT_QUESTION_MAX)
@@ -425,43 +459,55 @@ class ChatRequest(BaseModel):
     @field_validator("history")
     @classmethod
     def _truncate_history(cls, value: list[ChatMessage]) -> list[ChatMessage]:
-        # 截断而非报错：用户不该因为聊得久而被 422 拦下
+        # Truncate rather than raise: a user should not be blocked by a 422 just for
+        # having had a long conversation
         return value[-CHAT_HISTORY_MAX:]
 
 
 class Source(BaseModel):
-    """一条可引用的来源。
+    """A single citable source.
 
-    origin 说明这条链接是**哪一层**给的：
-        who    —— app.intel 从 WHO 疾病暴发新闻接口取回的通报（稳定、免费、总是可用）
-        search —— 模型这一轮联网检索真正返回的页面（按次计费，可能一无所获）
-    两层的可信度与时效性不同，前端要能分别标注，所以标签必须跟着链接一起走，
-    而不是靠 URL 前缀去猜。
+    origin says **which layer** produced this link:
+        who    -- a notice app.intel fetched from the WHO Disease Outbreak News API
+                  (stable, free, always available)
+        search -- a page the model's web search actually returned this round (metered,
+                  and may come back with nothing)
+    The two layers differ in trustworthiness and freshness and the front end has to be
+    able to label them separately, so the label travels with the link rather than being
+    guessed from a URL prefix.
 
-    authority 是**同一层内部**的第二个区分：检索结果里，一国卫生部的通报和
-    一个新闻聚合站会并排出现（实测新加坡那次，nea.gov.sg 与 magzter.com 同列）。
-    两者可核对程度差得远，所以按域名判定是否政府/国际卫生机构，让前端能标出来。
-    判定只看域名，不看内容——这是个可核对的事实，不是对质量的评价。
+    authority is a second distinction **within a single layer**: search results place a
+    national health ministry's notice and a news aggregator side by side (measured, in
+    the Singapore case: nea.gov.sg listed alongside magzter.com). They are worlds apart
+    in how checkable they are, so we judge by domain whether a source is a government or
+    international health body and let the front end mark it. The judgement looks only at
+    the domain, never at the content -- that keeps it a checkable fact rather than an
+    assessment of quality.
 
-    date 允许为空：WHO 通报一定有发布日期，检索结果经常没有。
+    date is allowed to be empty: WHO notices always have a publication date, search
+    results frequently do not.
     """
 
-    title: str = Field(..., description="页面标题，原样取自接口/检索结果")
-    date: str | None = Field(default=None, description="发布日期，取不到时为 null")
-    url: str = Field(..., description="来源页面地址")
-    origin: SourceOrigin = Field(default="who", description="这条来源来自哪一层")
+    title: str = Field(..., description="page title, taken verbatim from the API/search result")
+    date: str | None = Field(default=None, description="publication date; null when unavailable")
+    url: str = Field(..., description="source page address")
+    origin: SourceOrigin = Field(default="who", description="which layer this source came from")
     authority: SourceAuthority = Field(
-        default="other", description="域名是否属于政府或国际卫生机构"
+        default="other",
+        description="whether the domain belongs to a government or international health body",
     )
 
 
 class ChatResponse(BaseModel):
-    """POST /api/chat 响应体。
+    """POST /api/chat response body.
 
-    sources 是**这一轮真正取回过的**来源：WHO 工具结果 + 联网检索结果的并集。
-    它同时是给用户看的引用列表，和校验器判断「回复里的链接是不是编的」所依据的
-    白名单——回复中出现任何不在这个列表里的链接，这一轮就会被判失败并退回兜底文案。
-    没查任何东西（或什么都没查到）时它就是空列表，回复里也不该有任何链接。
+    sources holds the sources **actually retrieved this round**: the union of the WHO
+    tool results and the web search results. It is simultaneously the citation list
+    shown to the user and the allow-list the verifier uses to decide whether "a link in
+    the reply was made up" -- if any link appears in the reply that is not in this list,
+    the round is judged a failure and falls back to the template copy.
+    When nothing was looked up (or nothing was found) it is an empty list, and the reply
+    should not contain any links either.
     """
 
     reply: str
@@ -470,19 +516,21 @@ class ChatResponse(BaseModel):
         default=0,
         ge=0,
         description=(
-            "这一轮真的联网检索了几次。没有识别到地点、或 SEARCH_ENABLED=false 时恒为 0——"
-            "检索按次计费，花没花钱不该只有服务端日志知道。"
+            "how many web searches really ran this round. Always 0 when no location was "
+            "recognised or SEARCH_ENABLED=false -- search is metered, and whether money "
+            "was spent should not be knowable only from the server log."
         ),
     )
 
 
-# ---------- 目的地查询（POST /api/destination） ----------
+# ---------- Destination lookup (POST /api/destination) ----------
 
 DESTINATION_LOCATION_MAX = 120
 
 
 class WhoNotice(BaseModel):
-    """一条 WHO 疾病暴发新闻通报（形状与 intel.lookup_dengue_context 一致）。"""
+    """One WHO Disease Outbreak News notice (same shape as
+    intel.lookup_dengue_context)."""
 
     title: str
     date: str
@@ -490,11 +538,13 @@ class WhoNotice(BaseModel):
 
 
 class DestinationAdvice(BaseModel):
-    """出行前的三类建议。
+    """The three kinds of pre-travel advice.
 
-    字段顺序**刻意与 Advice 不同**：这里没有病人、也没有评分，用户是在出发前问
-    「那边现在什么情况」。最该先说的是怎么不被叮，其次才是「什么情况下去看医生」
-    与旅途中该盯着什么。Pydantic 按声明顺序序列化，这个顺序就是前端展示顺序。
+    The field order is **deliberately different from Advice**: there is no patient here
+    and no score, the user is asking "what is it like there right now" before leaving.
+    The first thing to say is how not to get bitten; only then "when to see a doctor"
+    and what to watch for during the trip. Pydantic serialises in declaration order, so
+    this order is the front end's display order.
     """
 
     protection: list[str]
@@ -503,15 +553,15 @@ class DestinationAdvice(BaseModel):
 
 
 class DestinationRequest(BaseModel):
-    """POST /api/destination 请求体。"""
+    """POST /api/destination request body."""
 
     location: str = Field(
         ...,
         min_length=1,
         max_length=DESTINATION_LOCATION_MAX,
-        description="国家 / 地区 / 城市名，任意语言",
+        description="country / region / city name, in any language",
     )
-    language: Language = Field(default="zh-CN", description="输出语言（BCP 47）")
+    language: Language = Field(default="zh-CN", description="output language (BCP 47)")
 
     @field_validator("location")
     @classmethod
@@ -523,31 +573,43 @@ class DestinationRequest(BaseModel):
 
 
 class DestinationResponse(BaseModel):
-    """POST /api/destination 响应体。
+    """POST /api/destination response body.
 
-    **这里没有任何评分**，一个也没有。地点从来不参与打分，也不改变暴露档位；
-    它是行前参考，与三个模型输出属于两件事。硬要在这里返回一个「目的地风险分」，
-    就是凭一张粗粒度国家表编出一个数字。
+    **There is no score here**, not one. A location never takes part in scoring and
+    never changes the exposure band; it is pre-travel reference material, a different
+    thing entirely from the three model outputs. Insisting on returning a "destination
+    risk score" here would mean inventing a number off the back of a coarse-grained
+    country table.
 
-    三层结构，可信度从高到低：
-      1. endemicity / season_note / who_notices —— 本地表 + WHO 接口，稳定且免费；
-      2. recent_findings —— 模型联网检索得到的「最近三个月」要点，按次计费，可能没有；
-      3. advice —— 与档位对应的固定文案，永远可用。
-    第 2 层没拿到时降级到 1+3，绝不用「常识」把它填满。
+    Three layers, in descending order of trustworthiness:
+      1. endemicity / season_note / who_notices -- local table + WHO API, stable and free;
+      2. recent_findings -- "last three months" points from the model's web search,
+         metered, and may be absent;
+      3. advice -- fixed copy matched to the band, always available.
+    When layer 2 does not come back we degrade to 1+3, and never pad it out with
+    "common knowledge".
     """
 
-    location: str = Field(..., description="规范英文名；没认出来就是原样输入")
-    matched: bool = Field(..., description="是否在内置地区表里认出了这个地名")
+    location: str = Field(..., description="canonical English name; the raw input if unrecognised")
+    matched: bool = Field(..., description="whether the place name was found in the built-in region table")
     endemicity: Endemicity
-    season_note: str | None = Field(default=None, description="季节/地域说明；未命中为 null")
+    season_note: str | None = Field(
+        default=None, description="seasonal/regional note; null when there was no match"
+    )
     who_notices: list[WhoNotice] = Field(default_factory=list)
     recent_findings: list[str] = Field(
         default_factory=list,
-        description="最近约三个月的事实要点；检索失败或未通过校验时为空列表",
+        description=(
+            "factual points from roughly the last three months; an empty list when the "
+            "search failed or did not pass validation"
+        ),
     )
     sources: list[Source] = Field(
         default_factory=list,
-        description="WHO 通报（origin=who）与检索结果（origin=search）的合并去重清单",
+        description=(
+            "merged, de-duplicated list of WHO notices (origin=who) and search results "
+            "(origin=search)"
+        ),
     )
     advice: DestinationAdvice
     search_status: SearchStatus
@@ -555,20 +617,24 @@ class DestinationResponse(BaseModel):
     model_note: str = MODEL_NOTES["zh-CN"]
 
 
-# 一次请求最多向用户展示几条检索来源。
-# 实测：两轮检索带回了 2 × 10 = 20 条结果，其中大半是新闻聚合站与不相关页面。
-# 20 条链接不是引用列表，是噪音。
+# Maximum number of search sources shown to the user per request.
+# Measured: two rounds of search brought back 2 × 10 = 20 results, more than half of
+# them news aggregators and irrelevant pages. Twenty links is not a citation list, it
+# is noise.
 MAX_SEARCH_SOURCES = 8
 
 
 def select_search_sources(
     sources: list[dict] | None, reply: str, limit: int = MAX_SEARCH_SOURCES
 ) -> list[dict]:
-    """从检索返回的一大堆结果里挑出要展示（也就是要进白名单）的那些。
+    """Pick, out of the pile of results the search returned, the ones to display (which
+    is to say, the ones that go into the allow-list).
 
-    **回复里真的引用过的链接一条都不能丢**：sources 同时是引用列表和校验器的
-    白名单，把模型真正引用的那条截掉，就会被自己的校验器判成「编造链接」，
-    好答案反而被退回兜底文案。所以先收全被引用的，再按原顺序补足到 limit。
+    **Not one link the reply actually cited may be dropped**: sources is both the
+    citation list and the verifier's allow-list, so truncating away the very entry the
+    model cited would get the reply judged as "fabricated link" by our own verifier, and
+    a good answer would be rolled back to the template copy. So we collect every cited
+    source first, then top up to limit in the original order.
     """
     items = [s for s in (sources or []) if isinstance(s, dict) and s.get("url")]
     text = reply or ""
@@ -585,18 +651,21 @@ def select_search_sources(
     return chosen
 
 
-# 政府域名标记：出现在国家顶级域之前（nea.gov.sg / doh.gov.ph / moph.go.th /
-# gob.mx / gouv.fr / govt.nz）。单独一个 "go" 很危险（go.com 不是政府），
-# 所以只在它后面跟着两字母国家码时才算数。
+# Government domain labels: these appear immediately before a country top-level domain
+# (nea.gov.sg / doh.gov.ph / moph.go.th / gob.mx / gouv.fr / govt.nz). A bare "go" is
+# dangerous on its own (go.com is not a government), so it only counts when followed by
+# a two-letter country code.
 _GOV_LABELS = frozenset({"gov", "gob", "go", "gouv", "govt"})
 
-# 没有政府域名但确属国际卫生/公共机构的，单独列出。宁可漏判也不错判：
-# 判成 official 是在告诉用户「这条更可核对」，错标的代价比漏标大。
+# Bodies that are genuinely international health/public institutions without a
+# government domain, listed separately. Better to under-classify than to
+# over-classify: marking something official tells the user "this one is more
+# checkable", and getting that wrong costs more than missing one.
 _OFFICIAL_HOSTS = frozenset(
     {
         "who.int",
         "paho.org",
-        "europa.eu",       # ECDC 挂在 ecdc.europa.eu
+        "europa.eu",       # ECDC lives at ecdc.europa.eu
         "un.org",
         "unicef.org",
     }
@@ -604,15 +673,18 @@ _OFFICIAL_HOSTS = frozenset(
 
 
 def classify_authority(url: str) -> SourceAuthority:
-    """按域名判断这条来源是不是政府 / 国际卫生机构。
+    """Judge from the domain whether this source is a government / international health body.
 
-    只看域名，不看内容——这样结论是可核对的事实，而不是对报道质量的评价。
-    一个卫生部的疫情通报和一个新闻聚合站的转载，读者有权一眼分清。
+    Only the domain is examined, never the content -- that way the conclusion is a
+    checkable fact rather than an assessment of reporting quality. A health ministry's
+    outbreak notice and a news aggregator's reprint are things the reader is entitled to
+    tell apart at a glance.
 
-    判定规则（任一命中即 official）：
-      · 顶级域是 gov 或 int          —— cdc.gov / who.int
-      · 倒数第二段是政府标记且顶级域是两字母国家码 —— nea.gov.sg / moph.go.th / gob.mx
-      · 域名或其父域在 _OFFICIAL_HOSTS 里 —— ecdc.europa.eu
+    Rules (any one match makes it official):
+      - the top-level domain is gov or int          -- cdc.gov / who.int
+      - the second-to-last label is a government label and the TLD is a two-letter
+        country code                                -- nea.gov.sg / moph.go.th / gob.mx
+      - the domain or one of its parents is in _OFFICIAL_HOSTS  -- ecdc.europa.eu
     """
     raw = (url or "").strip().lower()
     if "//" in raw:
@@ -639,17 +711,23 @@ def classify_authority(url: str) -> SourceAuthority:
 def merge_sources(
     who_notices: list[dict] | None, search_sources: list[dict] | None
 ) -> list[Source]:
-    """把两层来源合成一个带 origin 标签的列表：WHO 通报在前，检索结果在后。
+    """Combine the two layers of sources into one origin-tagged list: WHO notices first,
+    search results after.
 
-    放在 schemas 里而不是某个流水线模块里，是因为 /api/chat 与 /api/destination
-    都要用它，而「一条来源长什么样、来自哪一层」本来就是数据契约的一部分。
+    This lives in schemas rather than in some pipeline module because both /api/chat and
+    /api/destination need it, and "what a source looks like and which layer it came
+    from" is part of the data contract in the first place.
 
-    按 url 去重、保留顺序；WHO 在前是因为它更稳定也更容易核对。
-    date 取不到就是 None（检索结果经常没有 page_age），绝不用今天的日期顶上。
+    De-duplicated by url, order preserved; WHO comes first because it is both more
+    stable and easier to check.
+    date is None when unavailable (search results often have no page_age) -- never
+    substitute today's date for it.
 
-    检索那一段内部再把 official 的排到前面：模型引用与否是它自己的事，但
-    「哪几条来自卫生部门」应该先映入读者眼帘。**只调顺序，一条都不丢**——
-    sources 同时是校验器的白名单，删掉任何一条都可能让正确回复被判成编造链接。
+    Within the search segment, official sources are then moved to the front: whether the
+    model cites them is its own business, but "which of these came from a health
+    authority" should be the first thing to catch the reader's eye. **Reorder only,
+    never drop** -- sources is also the verifier's allow-list, and removing any entry
+    could get a correct reply judged as having fabricated a link.
     """
     merged: list[Source] = []
     seen: set[str] = set()
@@ -664,7 +742,7 @@ def merge_sources(
                 date=str(notice.get("date") or "") or None,
                 url=url,
                 origin="who",
-                authority="official",  # WHO 通报按定义就是官方来源
+                authority="official",  # a WHO notice is an official source by definition
             )
         )
     found: list[Source] = []
@@ -683,48 +761,56 @@ def merge_sources(
                 authority=classify_authority(url),
             )
         )
-    # 稳定排序：official 在前，其余保持检索返回的原顺序
+    # Stable sort: official first, everything else keeps the order search returned it in
     found.sort(key=lambda s: 0 if s.authority == "official" else 1)
     merged.extend(found)
     return merged
 
 
 def _drop_unknown_keys(value: dict, codes: tuple[str, ...]) -> dict:
-    """只保留契约内的键。
+    """Keep only the keys that are within the contract.
 
-    与 FormInput 的严格校验不同：/api/chat 的上下文是前端回传的快照，
-    多一个陌生键不该让用户问不了问题，静默丢弃即可。
+    Unlike FormInput's strict validation: the /api/chat context is a snapshot echoed
+    back by the front end, and one unfamiliar extra key should not stop the user asking
+    a question. Silently dropping it is enough.
     """
     return {k: v for k, v in value.items() if k in codes}
 
 
-# ---------- 自适应问诊规划（POST /api/plan） ----------
+# ---------- Adaptive questioning plan (POST /api/plan) ----------
 
 
 class PlanRequest(BaseModel):
-    """POST /api/plan 请求体：一份**部分作答**的问卷。
+    """POST /api/plan request body: a **partially answered** questionnaire.
 
-    与 FormInput 的关键差异：**键的存在与否本身携带信息**。
-      - 键存在 = 该问题已问过（yes / no / unknown 都是确定的回答）；
-      - 键缺失 = 该问题还没问，最终取值不确定。
+    The key difference from FormInput: **the presence or absence of a key is itself
+    information**.
+      - key present = the question has been asked (yes / no / unknown are all definite
+        answers);
+      - key absent = the question has not been asked yet, and its eventual value is
+        undetermined.
 
-    因此不能复用 FormInput——它的校验器会把缺失键补成 unknown，
-    恰好抹掉「已答不知道」与「还没问」的区别，而这正是规划器的全部依据。
-    age / sex / day_ill 是问卷第一步的必填项，规划从它们已知开始。
+    FormInput therefore cannot be reused -- its validators fill missing keys in as
+    unknown, which erases exactly the distinction between "answered don't know" and "not
+    asked yet", and that distinction is the planner's entire basis for working.
+    age / sex / day_ill are required in the first step of the questionnaire, so planning
+    starts from them already being known.
     """
 
-    age: int = Field(..., ge=0, le=110, description="年龄（岁）")
-    sex: Sex = Field(..., description="生理性别，F 女 / M 男")
-    day_ill: int = Field(..., ge=0, le=14, description="症状开始至今的天数")
+    age: int = Field(..., ge=0, le=110, description="age (years)")
+    sex: Sex = Field(..., description="sex at birth, F female / M male")
+    day_ill: int = Field(..., ge=0, le=14, description="days since symptom onset")
     symptoms: dict[str, SymptomAnswer] = Field(
         default_factory=dict,
-        description="已作答的症状：键存在 = 已问。缺失键 = 未问，不做补全。",
+        description="answered symptoms: key present = asked. Missing key = not asked; not filled in.",
     )
     comorbidities: dict[str, SymptomAnswer] = Field(
         default_factory=dict,
-        description="已作答的合并症，语义同 symptoms。",
+        description="answered comorbidities; same semantics as symptoms.",
     )
-    language: Language = Field(default="zh-CN", description="输出语言（用于错误信息本地化）")
+    language: Language = Field(
+        default="zh-CN", description="output language (used to localise error messages)"
+    )
 
     @field_validator("symptoms")
     @classmethod
@@ -738,26 +824,32 @@ class PlanRequest(BaseModel):
 
 
 class ModelBounds(BaseModel):
-    """单个模型在部分作答下的分数硬边界（同一归一化，同一分档）。"""
+    """Hard score bounds for a single model under partial answers (same normalisation,
+    same banding)."""
 
     score_now: float = Field(
         ..., ge=0.0, le=100.0,
-        description="未问按 0 计的当前分——用户此刻停止作答时的最终分",
+        description=(
+            "current score counting unasked questions as 0 -- the final score if the "
+            "user stopped answering right now"
+        ),
     )
     score_min: float = Field(
-        ..., ge=0.0, le=100.0, description="剩余问题任意作答都到不了更低的分数下界"
+        ..., ge=0.0, le=100.0,
+        description="lower bound: no answer to the remaining questions can go below this",
     )
     score_max: float = Field(
-        ..., ge=0.0, le=100.0, description="剩余问题任意作答都到不了更高的分数上界"
+        ..., ge=0.0, le=100.0,
+        description="upper bound: no answer to the remaining questions can go above this",
     )
     level_now: RiskLevel
     decided: bool = Field(
-        ..., description="[score_min, score_max] 是否已落在同一风险档位内"
+        ..., description="whether [score_min, score_max] already falls within a single risk band"
     )
 
 
 class PlanBounds(BaseModel):
-    """三个模型的分数边界，键名与 AssessmentResult 一致。"""
+    """Score bounds for the three models, keyed the same way as AssessmentResult."""
 
     dengue: ModelBounds
     worsening: ModelBounds
@@ -765,25 +857,30 @@ class PlanBounds(BaseModel):
 
 
 class NextQuestion(BaseModel):
-    """建议接下来问的一道题。"""
+    """A question suggested as the next one to ask."""
 
     kind: Literal["symptom", "comorbidity"]
-    code: str = Field(..., description="SYMPTOM_CODES / COMORB_CODES 中的问题代码")
+    code: str = Field(..., description="question code from SYMPTOM_CODES / COMORB_CODES")
     why_model: Literal["dengue", "worsening", "severe"] = Field(
-        ..., description="这道题主要在收窄哪个尚未定档模型的估计"
+        ...,
+        description="which not-yet-banded model's estimate this question mainly narrows",
     )
 
 
 class PlanResponse(BaseModel):
-    """POST /api/plan 响应体。"""
+    """POST /api/plan response body."""
 
     bounds: PlanBounds
     can_stop: bool = Field(
-        ..., description="三个模型全部 decided：任何剩余答案都无法改变任何档位"
+        ...,
+        description="all three models decided: no remaining answer can change any band",
     )
     next: list[NextQuestion] = Field(
         default_factory=list,
-        description="最多 5 条，按信息价值降序；全部定档后恒为空",
+        description=(
+            "at most 5, in descending order of information value; always empty once "
+            "every model is banded"
+        ),
     )
-    answered: int = Field(..., ge=0, description="已作答的症状 + 合并症数量")
-    remaining: int = Field(..., ge=0, description="尚未问的症状 + 合并症数量")
+    answered: int = Field(..., ge=0, description="number of symptoms + comorbidities answered")
+    remaining: int = Field(..., ge=0, description="number of symptoms + comorbidities not yet asked")

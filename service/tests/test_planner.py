@@ -1,4 +1,4 @@
-"""自适应问诊规划器 /api/plan 的测试（纯确定性计算，无网络请求）。"""
+"""Tests for the adaptive questioning planner /api/plan (deterministic, no network)."""
 
 import json
 from datetime import date
@@ -8,7 +8,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# 与 app.schemas 保持一致的问题清单（在测试里显式写出，防止契约悄悄漂移）
+# Question list kept in step with app.schemas (written out explicitly in the test,
+# so the contract cannot drift silently)
 SYMPTOM_CODES = (
     "FEBRE", "MIALGIA", "CEFALEIA", "EXANTEMA", "VOMITO", "NAUSEA",
     "DOR_COSTAS", "CONJUNTVIT", "ARTRITE", "ARTRALGIA", "PETEQUIA_N",
@@ -25,7 +26,7 @@ FIELD_OF = {"A": "dengue", "B": "worsening", "B2": "severe"}
 
 @pytest.fixture()
 def client(monkeypatch):
-    """强制 MOCK_MODE=true 并重置配置缓存后，构造 TestClient。"""
+    """Build a TestClient after forcing MOCK_MODE=true and clearing the settings cache."""
     monkeypatch.setenv("MOCK_MODE", "true")
     from app.config import get_settings
 
@@ -42,7 +43,7 @@ def client(monkeypatch):
 
 
 def plan_body(**overrides) -> dict:
-    """最小合法请求：只有必填的 age / sex / day_ill。"""
+    """Minimal valid request: only the mandatory age / sex / day_ill."""
     body = {"age": 35, "sex": "F", "day_ill": 3}
     body.update(overrides)
     return body
@@ -56,10 +57,11 @@ def load_coefs() -> dict[str, dict[str, float]]:
 
 
 def hand_span(coef: dict[str, float]) -> float:
-    """独立实现的归一化跨度 z_ceil − z_ref（季节项在两端相同，天然抵消）。
+    """Independently implemented normalisation span z_ceil - z_ref.
 
-    z_ceil：所有升高风险的特征取上界（age 110、day_ill 14、二值取 1）；
-    z_ref ：30 岁男性、无症状、病程 0 天 —— 只剩 age 项。
+    The seasonal terms are the same at both ends, so they cancel naturally.
+    z_ceil: every risk-raising feature at its upper bound (age 110, day_ill 14, binary 1);
+    z_ref : a 30-year-old male, no symptoms, 0 days of illness -- only the age term left.
     """
     total = 0.0
     for name, c in coef.items():
@@ -74,7 +76,7 @@ def hand_span(coef: dict[str, float]) -> float:
     return total - coef["age"] * 30.0
 
 
-# ---------- 空问卷：区间大开，next 按信息价值排序 ----------
+# ---------- Empty questionnaire: wide intervals, next sorted by information value ----------
 
 
 def test_empty_answers_wide_intervals_cannot_stop(client):
@@ -90,22 +92,23 @@ def test_empty_answers_wide_intervals_cannot_stop(client):
         block = body["bounds"][field]
         assert 0.0 <= block["score_min"] <= block["score_now"] <= block["score_max"] <= 100.0
         assert block["decided"] is False
-        # 21 道题全部悬空时，区间必须是「大开」的，横跨不止一个档位
+        # With all 21 questions open the interval must be wide, spanning more than one band
         assert block["score_max"] - block["score_min"] > 30.0
 
     assert 1 <= len(body["next"]) <= 5
 
 
 def test_first_suggestion_has_highest_normalised_impact(client):
-    """next[0] 必须是未定模型上归一化 |系数| 之和最大的问题。
+    """next[0] must maximise the summed normalised |coefficient| over undecided models.
 
-    期望值在测试里用 JSON 系数独立算出，不照抄实现。
+    The expected value is computed in the test from the JSON coefficients rather than
+    copied from the implementation.
     """
     body = client.post("/api/plan", json=plan_body()).json()
     coefs = load_coefs()
     spans = {key: hand_span(coefs[key]) for key in coefs}
     undecided = [KEY_OF[f] for f in FIELDS if not body["bounds"][f]["decided"]]
-    assert undecided, "空问卷至少应有一个模型未定档"
+    assert undecided, "an empty questionnaire must leave at least one model undecided"
 
     def impact(code: str) -> float:
         return sum(
@@ -113,18 +116,18 @@ def test_first_suggestion_has_highest_normalised_impact(client):
         )
 
     all_codes = list(SYMPTOM_CODES + COMORB_CODES)
-    expected_top = max(all_codes, key=impact)  # 平手取靠前者，与 FEATS 顺序一致
+    expected_top = max(all_codes, key=impact)  # ties go to the earlier one, as in FEATS order
     got = body["next"][0]
     assert got["code"] == expected_top
 
-    # why_model：该问题归一化 |系数| 最大的未定模型
+    # why_model: the undecided model with this question's largest normalised |coefficient|
     expected_why = max(
         undecided,
         key=lambda key: abs(coefs[key].get(f"{expected_top}_x", 0.0)) / spans[key],
     )
     assert got["why_model"] == FIELD_OF[expected_why]
 
-    # 整个 next 列表按 impact 严格不升序排列，且只含未问的合法代码
+    # The whole next list is non-increasing in impact, and holds only unasked valid codes
     impacts = [impact(item["code"]) for item in body["next"]]
     assert impacts == sorted(impacts, reverse=True)
     for item in body["next"]:
@@ -133,7 +136,7 @@ def test_first_suggestion_has_highest_normalised_impact(client):
         assert item["kind"] == expected_kind
 
 
-# ---------- 完整作答：与 /api/assess 完全一致 ----------
+# ---------- Fully answered: identical to /api/assess ----------
 
 FULL_SYMPTOMS = {
     "FEBRE": "yes", "MIALGIA": "yes", "CEFALEIA": "no", "EXANTEMA": "no",
@@ -148,7 +151,7 @@ FULL_COMORB = {
 
 
 def test_fully_answered_collapses_and_matches_assess(client):
-    """答完全部 21 题：区间收成一个点，且 score_now == /api/assess 的分数。"""
+    """All 21 answered: the interval collapses to a point and score_now == /api/assess."""
     body = client.post(
         "/api/plan",
         json=plan_body(symptoms=FULL_SYMPTOMS, comorbidities=FULL_COMORB),
@@ -176,10 +179,10 @@ def test_fully_answered_collapses_and_matches_assess(client):
 
 
 def test_partial_score_now_matches_assess_with_missing_as_unknown(client):
-    """部分作答时 score_now == 同一份答案走 /api/assess 的分数。
+    """Partly answered: score_now == the score the same answers get from /api/assess.
 
-    /api/assess 的 FormInput 会把缺失键补成 unknown（编码 0），
-    这正是「未问按 0 计」的语义——两条路径必须给出同一个数。
+    FormInput in /api/assess fills missing keys in as unknown (encoded 0), which is
+    exactly the "unasked counts as 0" semantics -- both paths must give the same number.
     """
     symptoms = {"FEBRE": "yes", "VOMITO": "no", "LEUCOPENIA": "unknown"}
     comorb = {"DIABETES": "unknown"}
@@ -200,11 +203,11 @@ def test_partial_score_now_matches_assess_with_missing_as_unknown(client):
         assert body["bounds"][field]["level_now"] == assess[field]["level"]
 
 
-# ---------- 「已答不知道」与「还没问」是两回事 ----------
+# ---------- "Answered do not know" and "not yet asked" are different ----------
 
 
 def test_answered_unknown_tightens_exactly_like_no(client):
-    """答「不知道」与答「否」必须给出完全相同的规划结果。"""
+    """Answering "do not know" and answering "no" must give identical planning results."""
     with_unknown = client.post(
         "/api/plan", json=plan_body(comorbidities={"DIABETES": "unknown"})
     ).json()
@@ -215,10 +218,11 @@ def test_answered_unknown_tightens_exactly_like_no(client):
 
 
 def test_answered_unknown_tightens_versus_unasked(client):
-    """答过「不知道」后区间必须收窄，且该题从 next 中消失。
+    """Once "do not know" is answered the interval must narrow and the question leave next.
 
-    DIABETES 在三个模型中系数均为正（0.093 / 0.389 / 0.655），
-    回答后 score_max 应严格下降，score_min 不动（正系数只影响上界）。
+    DIABETES has a positive coefficient in all three models (0.093 / 0.389 / 0.655), so
+    after answering score_max must fall strictly while score_min stays put (a positive
+    coefficient only moves the upper bound).
     """
     unasked = client.post("/api/plan", json=plan_body()).json()
     answered = client.post(
@@ -231,16 +235,16 @@ def test_answered_unknown_tightens_versus_unasked(client):
         before, after = unasked["bounds"][field], answered["bounds"][field]
         assert after["score_max"] < before["score_max"]
         assert after["score_min"] == before["score_min"]
-        assert after["score_now"] == before["score_now"]  # unknown 编码为 0，当前分不变
+        assert after["score_now"] == before["score_now"]  # unknown encodes 0, so no change
 
     assert "DIABETES" not in [item["code"] for item in answered["next"]]
 
 
-# ---------- 单调收窄：作答永不扩大区间 ----------
+# ---------- Monotone narrowing: answering never widens an interval ----------
 
 
 def test_answering_never_widens_any_interval(client):
-    """从空问卷出发，任答一题（任一答案）都不得扩大任何模型的区间。"""
+    """From an empty questionnaire, any single answer must not widen any model's interval."""
     base = client.post("/api/plan", json=plan_body()).json()
 
     for kind_field, codes in (("symptoms", SYMPTOM_CODES), ("comorbidities", COMORB_CODES)):
@@ -256,7 +260,7 @@ def test_answering_never_widens_any_interval(client):
 
 
 def test_answering_never_widens_from_partial_state(client):
-    """从部分作答状态出发同样成立。"""
+    """The same holds starting from a partly answered state."""
     answered_symptoms = {"FEBRE": "yes", "LEUCOPENIA": "no"}
     answered_comorb = {"RENAL": "unknown"}
     base = client.post(
@@ -281,12 +285,13 @@ def test_answering_never_widens_from_partial_state(client):
                 assert b1["score_max"] <= b0["score_max"], (code, answer, field)
 
 
-# ---------- 提前停止：整个规划器存在的意义 ----------
+# ---------- Early stopping: the whole point of the planner ----------
 
 
 def test_early_stop_with_many_questions_unasked(client):
-    """精心构造：25 岁男性、病程 0 天，对 7 道高影响题答「否」后，
-    三个模型全部定档为 low —— 还剩 14 道题没问也可以停。
+    """Carefully built: a 25-year-old male, 0 days of illness, answering "no" to the 7
+    highest-impact questions puts all three models in the low band -- 14 questions can
+    stay unasked and it can still stop.
     """
     body = client.post(
         "/api/plan",
@@ -303,7 +308,7 @@ def test_early_stop_with_many_questions_unasked(client):
 
     assert body["can_stop"] is True
     assert body["answered"] == 7
-    assert body["remaining"] == 14  # 大量问题未问，但已可证明性地停止
+    assert body["remaining"] == 14  # many questions unasked, but stopping is now provable
     assert body["next"] == []
     for field in FIELDS:
         block = body["bounds"][field]
@@ -313,8 +318,8 @@ def test_early_stop_with_many_questions_unasked(client):
 
 
 def test_greedy_loop_following_planner_stops_early(client):
-    """自适应闭环：每轮都答掉规划器的第一条建议（答「否」），
-    必须在问完 21 题之前就到达 can_stop。
+    """Adaptive loop: answer the planner's first suggestion each round (with "no"), and
+    can_stop must be reached before all 21 questions have been asked.
     """
     symptoms: dict[str, str] = {}
     comorbidities: dict[str, str] = {}
@@ -332,17 +337,17 @@ def test_greedy_loop_following_planner_stops_early(client):
         target[top["code"]] = "no"
 
     assert body is not None and body["can_stop"] is True
-    assert body["remaining"] > 0, "跟着规划器走必须能在问完之前停下"
+    assert body["remaining"] > 0, "following the planner must stop before the list runs out"
     assert body["next"] == []
-    # 高影响题优先意味着收敛应当很快（人工推演为 7 题左右）
+    # High-impact questions first means fast convergence (hand-traced at about 7 questions)
     assert body["answered"] <= 10
 
 
-# ---------- decided 必须严格尊重 35 / 65 的分档边界 ----------
+# ---------- decided must strictly respect the 35 / 65 band boundaries ----------
 
 
 def _fake_model(coef: dict[str, float]):
-    """三个键位使用同一份合成系数的注入模型。"""
+    """An injected model whose three keys all share the same synthetic coefficients."""
     from app.ml_model import DengueModel
 
     models = {
@@ -361,10 +366,10 @@ def _plan_direct(coef: dict[str, float], symptoms: dict[str, str]):
 
 
 def test_interval_exactly_35_to_65_is_decided_medium():
-    """[35.0, 65.0] 两端都在 medium（35 含、65 含）→ decided。
+    """[35.0, 65.0] has both ends in medium (35 included, 65 included) -> decided.
 
-    合成系数总正量 = 1.0（归一化跨度为 1），FEBRE 已答 yes 贡献 0.35，
-    MIALGIA 未问可再加 0.30，LEUCOPENIA 已答 no。
+    Total positive synthetic coefficient = 1.0 (normalisation span 1); FEBRE answered
+    yes contributes 0.35, unasked MIALGIA could add 0.30, LEUCOPENIA answered no.
     """
     coef = {"FEBRE_x": 0.35, "MIALGIA_x": 0.30, "LEUCOPENIA_x": 0.35}
     result = _plan_direct(coef, {"FEBRE": "yes", "LEUCOPENIA": "no"})
@@ -376,11 +381,11 @@ def test_interval_exactly_35_to_65_is_decided_medium():
         assert block.decided is True
     assert result.can_stop is True
     assert result.next == []
-    assert result.remaining == 19  # 定档后 next 为空，与还剩多少题无关
+    assert result.remaining == 19  # next empties once decided, regardless of how many remain
 
 
 def test_interval_crossing_35_is_not_decided():
-    """[34.9, 65.0] 下端落进 low → 不能停。"""
+    """[34.9, 65.0] has its lower end in low -> cannot stop."""
     coef = {"FEBRE_x": 0.349, "MIALGIA_x": 0.301, "LEUCOPENIA_x": 0.35}
     result = _plan_direct(coef, {"FEBRE": "yes", "LEUCOPENIA": "no"})
 
@@ -390,13 +395,14 @@ def test_interval_crossing_35_is_not_decided():
         assert block.score_max == 65.0
         assert block.decided is False
     assert result.can_stop is False
-    # 唯一有非零影响的未问题是 MIALGIA；零系数问题不值得建议
+    # MIALGIA is the only unasked question with non-zero impact; a zero-coefficient
+    # question is not worth suggesting
     assert [item.code for item in result.next] == ["MIALGIA"]
-    assert result.next[0].why_model == "dengue"  # 三模型同系数，平手取靠前者
+    assert result.next[0].why_model == "dengue"  # equal coefficients: ties go to the first
 
 
 def test_interval_crossing_65_is_not_decided():
-    """[65.0, 65.1] 上端落进 high → 不能停。"""
+    """[65.0, 65.1] has its upper end in high -> cannot stop."""
     coef = {"FEBRE_x": 0.65, "MIALGIA_x": 0.001, "LEUCOPENIA_x": 0.349}
     result = _plan_direct(coef, {"FEBRE": "yes", "LEUCOPENIA": "no"})
 
@@ -408,11 +414,11 @@ def test_interval_crossing_65_is_not_decided():
     assert result.can_stop is False
 
 
-# ---------- 季节无关性 ----------
+# ---------- Season independence ----------
 
 
 def test_bounds_independent_of_season():
-    """季节项在 z、z_ref、z_ceil 中相同，归一化后抵消：换周次结果不变。"""
+    """Seasonal terms are equal in z, z_ref and z_ceil and cancel: the week does not matter."""
     from app.planner import plan
     from app.schemas import PlanRequest
 
@@ -427,7 +433,7 @@ def test_bounds_independent_of_season():
     assert january.can_stop == july.can_stop
 
 
-# ---------- 输入校验 ----------
+# ---------- Input validation ----------
 
 
 def test_unknown_symptom_code_rejected(client):
@@ -436,7 +442,7 @@ def test_unknown_symptom_code_rejected(client):
 
 
 def test_symptom_code_in_comorbidities_rejected(client):
-    """症状代码放错到 comorbidities 也必须 422，不能静默吞掉。"""
+    """A symptom code misplaced into comorbidities must 422, not be swallowed silently."""
     resp = client.post("/api/plan", json=plan_body(comorbidities={"FEBRE": "yes"}))
     assert resp.status_code == 422
 
@@ -459,7 +465,7 @@ def test_out_of_range_values_rejected(client, overrides):
 
 
 def test_mandatory_first_step_fields_required(client):
-    """age / sex / day_ill 是规划的前提（必填第一步），缺一不可。"""
+    """age / sex / day_ill are the mandatory first step of planning; none may be missing."""
     for missing in ("age", "sex", "day_ill"):
         body = plan_body()
         del body[missing]
@@ -467,10 +473,10 @@ def test_mandatory_first_step_fields_required(client):
 
 
 def test_missing_keys_stay_unasked_not_unknown():
-    """PlanRequest 绝不能补全缺失键——缺失本身就是「未问」信号。"""
+    """PlanRequest must never fill in missing keys -- absence is the "unasked" signal."""
     from app.schemas import PlanRequest
 
     req = PlanRequest.model_validate(plan_body(symptoms={"FEBRE": "yes"}))
-    assert req.symptoms == {"FEBRE": "yes"}          # 只保留真的答过的
+    assert req.symptoms == {"FEBRE": "yes"}          # only what was really answered
     assert req.comorbidities == {}
-    assert "LEUCOPENIA" not in req.symptoms          # 不像 FormInput 那样补 unknown
+    assert "LEUCOPENIA" not in req.symptoms          # no unknown filled in, unlike FormInput

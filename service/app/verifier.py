@@ -1,46 +1,56 @@
-"""输出校验器：对 LLM 生成的文本做**纯规则**检查，不调用任何模型、不发网络请求。
+"""Output verifier: **pure rule** checks on LLM-generated text; no model call, no network.
 
-定位：模型生成之后、返回给用户之前的最后一道闸门。它不判断「建议好不好」，
-只判断「有没有越过这个服务不允许越过的线」——那些线是可以用规则写死的：
+Its place: the last gate after the model has generated and before anything reaches the
+user. It does not judge whether the advice is any good, only whether it crossed a line this
+service does not allow crossing -- the lines that can be written down as rules:
 
-  dosage          具体药物剂量（本服务从不开处方，剂量必须由医生给）
-  probability     把百分比说成「你感染的概率」（模型无截距，只有相对评分）
-  urgency_missing 高风险 / 有警示征象却没说要就医（最危险的一种失败）
-  language_mismatch  答非所语（用户选了西语却回中文）
-  structure       结构越界（条目为空、条目过多、单条过长）
-  fabricated_url  引用了本轮工具没返回过的链接（编造引用）
-  empty           空回复
+  dosage          a specific drug dose (this service never prescribes; a dose must come
+                  from a clinician)
+  probability     presenting a percentage as "your probability of infection" (the model has
+                  no intercept, only relative scores)
+  urgency_missing high risk / warning signs present, yet no mention of seeking care (the
+                  most dangerous kind of failure)
+  language_mismatch  answering in the wrong language (the user chose Spanish, the reply
+                  came back in Chinese)
+  structure       shape out of bounds (empty items, too many items, one item too long)
+  fabricated_url  citing a link no tool returned this turn (a fabricated citation)
+  empty           empty reply
 
-每条违规都带一个**给模型看的** message：流水线会把它拼回提示词里要求重写一次，
-写不对就退回模板文案。因此 message 用第二人称、说清「错在哪、该怎么改」。
+Every violation carries a message written **for the model**: the pipeline splices it back
+into the prompt and asks for one rewrite, falling back to the template copy if that still
+comes out wrong. The message therefore uses the second person and spells out what is wrong
+and how to fix it.
 
-⚠️ 本模块的就医词表刻意**不**从 scripts/eval_run.py 导入，反之亦然。
-两份词表是故意重复的：任何一方悄悄改了措辞，另一方就会报红。
+⚠️ The seek-care lexicon in this module is deliberately **not** imported from
+scripts/eval_run.py, nor the other way round. The two lexicons are duplicated on purpose:
+if either side quietly changes its wording, the other one goes red.
 """
 
 import re
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
-# 三类建议的键（与 schemas.Advice 的字段一致）
+# Keys of the three advice sections (matching the fields of schemas.Advice)
 ADVICE_SECTIONS: tuple[str, ...] = ("medical", "monitoring", "protection")
 
-# 单条建议的字符上限 / 每类建议的条数区间
+# Character cap for one advice item / allowed item-count range per section
 MAX_ITEM_CHARS = 400
 MIN_ITEMS = 1
 MAX_ITEMS = 5
 
-# CJK 判定：用于语言一致性检查
+# CJK detection: used by the language consistency check
 _CJK_RE = re.compile(r"[㐀-䶿一-鿿]")
 
-# 中文类语言要求的最低 CJK 字符占比；拉丁语言允许的最高占比
+# Minimum CJK character share required of the Chinese languages; maximum share allowed
+# for the Latin-script ones
 CJK_MIN_RATIO = 0.3
 CJK_MAX_RATIO = 0.05
 
-# ---------- 规则 1：剂量 ----------
-# 「数字 + 剂量单位」或「服药频次」。注意只认**数字紧邻单位**的写法：
-# 「避免服用阿司匹林或布洛芬」这种不带数字的用药提醒必须放行——那是安全提示，
-# 不是处方。(?![0-9A-Za-z]) 防止 g 命中 gums / gently 这类单词。
+# ---------- Rule 1: dosage ----------
+# "number + dose unit" or "dosing frequency". Note that only **a number directly adjacent to
+# a unit** counts: a medication warning carrying no number, such as "avoid taking aspirin or
+# ibuprofen", must be let through -- that is a safety note, not a prescription.
+# (?![0-9A-Za-z]) keeps g from matching words like gums / gently.
 _DOSAGE_UNIT_RE = re.compile(
     r"\d+(?:[.,]\d+)?\s*"
     r"(?:mg|ml|mcg|µg|ug|g(?![0-9A-Za-z])|grams?|gramas?|gramos?"
@@ -55,22 +65,23 @@ _DOSAGE_FREQ_RE = re.compile(
     re.IGNORECASE,
 )
 
-# ---------- 规则 2：感染概率 ----------
+# ---------- Rule 2: infection probability ----------
 _PERCENT_RE = re.compile(r"\d+(?:[.,]\d+)?\s*%|百分之\s*\d+")
 _PROBABILITY_RE = re.compile(
     r"概率|機率|\bprobability\b|\bchance\b|\bprobabilidad\b|\bprobabilidade\b",
     re.IGNORECASE,
 )
-# 第二人称指代：句子里同时出现「百分比 + 概率措辞 + 你」才算把概率安到用户头上。
-# 「90% 的登革热病例是轻症」是流行病学事实，不能误伤。
+# Second-person reference: only a sentence carrying a percentage AND probability wording AND
+# "you" counts as pinning a probability on the user. "90% of dengue cases are mild" is an
+# epidemiological fact and must not be caught by mistake.
 _SECOND_PERSON_RE = re.compile(
     r"您|你|\byou\b|\byour\b|\busted\b|\bsu\b|\bvocê\b|\bvoce\b|\bseu\b",
     re.IGNORECASE,
 )
-# 断句：中英西葡的句末标点 + 换行 + 分号
+# Sentence splitting: sentence-final punctuation in zh/en/es/pt + newlines + semicolons
 _SENTENCE_SPLIT_RE = re.compile(r"[。！？；!?;\n]+|(?<=[a-zA-Z0-9\)\]])\.(?=\s|$)")
 
-# ---------- 规则 3：就医紧迫性词表（**故意与 eval_run.py 重复**） ----------
+# ---------- Rule 3: seek-care lexicon (**deliberately duplicated in eval_run.py**) ----------
 URGENCY_LEXICON: dict[str, tuple[str, ...]] = {
     "zh-CN": ("尽快就医", "立即就医", "及时就医", "尽早就医", "就医", "就诊", "急诊", "前往医院"),
     "zh-TW": ("儘快就醫", "盡快就醫", "立即就醫", "及時就醫", "就醫", "就診", "急診", "前往醫院"),
@@ -89,7 +100,7 @@ URGENCY_LEXICON: dict[str, tuple[str, ...]] = {
     ),
 }
 
-# ---------- 规则 4：语言一致性 ----------
+# ---------- Rule 4: language consistency ----------
 CJK_LANGUAGES: tuple[str, ...] = ("zh-CN", "zh-TW")
 FUNCTION_WORDS: dict[str, tuple[str, ...]] = {
     "es": ("que", "para", "con", "los", "las"),
@@ -98,34 +109,36 @@ FUNCTION_WORDS: dict[str, tuple[str, ...]] = {
 }
 MIN_FUNCTION_WORDS = 2
 
-# ---------- 规则 6：URL ----------
+# ---------- Rule 6: URL ----------
 _URL_RE = re.compile(r"https?://[^\s<>\"'）)】\]\[（(，。；、]+", re.IGNORECASE)
 _URL_TRAILING = ".,;:!?'\")]}>，。；！？、）】"
 
 
 @dataclass(frozen=True)
 class Violation:
-    """一条违规。code 供程序分支，message 会被原样喂回模型要求重写。"""
+    """One violation. code is what the program branches on; message is fed back to the
+    model verbatim to ask for a rewrite.
+    """
 
     code: str
     message: str
 
-    def __str__(self) -> str:  # 便于日志与提示词拼接
+    def __str__(self) -> str:  # convenient for logs and prompt splicing
         return f"[{self.code}] {self.message}"
 
 
-# ---------- 通用工具 ----------
+# ---------- Shared helpers ----------
 
 
 def _texts_of_advice(advice: Any) -> dict[str, list[str]]:
-    """把 Advice 模型或等价 dict 归一成 {section: [item, ...]}。"""
+    """Normalise an Advice model or an equivalent dict into {section: [item, ...]}."""
     sections: dict[str, list[str]] = {}
     for name in ADVICE_SECTIONS:
         if isinstance(advice, Mapping):
             items = advice.get(name)
         else:
             items = getattr(advice, name, None)
-        if isinstance(items, str):  # 单条字符串也接住，交给 structure 规则报错
+        if isinstance(items, str):  # catch a bare string too; the structure rule reports it
             items = [items]
         sections[name] = [str(i) for i in items] if isinstance(items, Sequence) and not isinstance(items, str) else []
     return sections
@@ -136,7 +149,7 @@ def _sentences(text: str) -> list[str]:
 
 
 def _cjk_ratio(text: str) -> float:
-    """CJK 表意字符占**非空白字符**的比例。空文本记 0。"""
+    """Share of CJK ideographs among **non-whitespace characters**. Empty text counts as 0."""
     dense = [c for c in text if not c.isspace()]
     if not dense:
         return 0.0
@@ -144,7 +157,7 @@ def _cjk_ratio(text: str) -> float:
 
 
 def extract_urls(text: str) -> list[str]:
-    """抽取回复中的 http(s) 链接，去掉尾随标点。"""
+    """Extract the http(s) links in a reply, stripping trailing punctuation."""
     found = []
     for raw in _URL_RE.findall(text or ""):
         url = raw.rstrip(_URL_TRAILING)
@@ -153,7 +166,7 @@ def extract_urls(text: str) -> list[str]:
     return found
 
 
-# ---------- 单条规则 ----------
+# ---------- Individual rules ----------
 
 
 def _check_dosage(texts: Sequence[str], where: str) -> list[Violation]:
@@ -199,7 +212,7 @@ def _check_urgency(
     if overall_tier != "high" and not warning_signs:
         return []
     keywords = URGENCY_LEXICON.get(language)
-    if keywords is None:  # 未知语言：无从判断，不误报
+    if keywords is None:  # unknown language: nothing to judge against, so no false alarm
         return []
     lowered = [str(item).lower() for item in medical]
     if any(k.lower() in text for text in lowered for k in keywords):
@@ -282,7 +295,7 @@ def _check_structure(sections: Mapping[str, list[str]]) -> list[Violation]:
     ]
 
 
-# ---------- 对外接口 ----------
+# ---------- Public interface ----------
 
 
 def verify_advice(
@@ -292,10 +305,10 @@ def verify_advice(
     overall_tier: str,
     warning_signs: Sequence[str] | None = None,
 ) -> list[Violation]:
-    """校验一份生成的建议。返回违规列表，全部通过时为空列表。
+    """Verify a generated advice object. Returns a list of violations, empty when all pass.
 
-    advice 可以是 schemas.Advice 实例，也可以是同形状的 dict——校验器要能在
-    Pydantic 校验之前/之后都跑得动。
+    advice may be a schemas.Advice instance or a dict of the same shape -- the verifier has
+    to run both before and after Pydantic validation.
     """
     warning_signs = list(warning_signs or [])
     sections = _texts_of_advice(advice)
@@ -314,11 +327,12 @@ def verify_advice(
 def verify_chat_reply(
     reply: str, language: str, allowed_urls: Sequence[str] | None = None
 ) -> list[Violation]:
-    """校验一条追问回复。
+    """Verify one follow-up reply.
 
-    allowed_urls 是**本轮工具调用真正返回过的**链接。空列表意味着这一轮没有
-    任何可引用来源，于是回复里出现任何链接都算编造——这正是阻止模型自己
-    「想」出一个 WHO 页面的那条不变量。
+    allowed_urls are the links **this turn's tool calls actually returned**. An empty list
+    means there is no citable source this turn, so any link appearing in the reply counts
+    as fabricated -- this is precisely the invariant that stops the model from "recalling"
+    a WHO page of its own.
     """
     text = reply or ""
     if not text.strip():
@@ -353,9 +367,10 @@ def verify_chat_reply(
 
 
 def format_violations(violations: Sequence[Violation], *, as_json: bool = True) -> str:
-    """把违规列表拼成回喂给模型的整改要求。
+    """Splice the violation list into the correction request fed back to the model.
 
-    as_json=True 用于建议生成（输出是 JSON 对象），False 用于追问回复（散文）。
+    as_json=True is for advice generation (the output is a JSON object), False for
+    follow-up replies (prose).
     """
     listed = "\n".join(f"- {v}" for v in violations)
     shape = "the same JSON object" if as_json else "your answer as plain prose"

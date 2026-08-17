@@ -1,11 +1,15 @@
-"""输出校验器（app/verifier.py）测试：每条规则都要**两个方向**都测。
+"""Output verifier (app/verifier.py) tests: every rule is tested in **both directions**.
 
-只测「违规能被抓到」是不够的——一个永远返回违规的校验器也能通过那种测试，
-而它会把每一次真实生成都打回模板。因此每条规则都配一条**必须放行**的样本，
-而且五种语言各来一遍：措辞的边界正是这些规则最容易误伤的地方。
+Testing only that "a violation is caught" is not enough -- a verifier that always
+returned a violation would pass that too, and it would send every real generation back
+to the template. So every rule also gets a sample that **must be allowed through**,
+once in each of the five languages: the edges of the wording are exactly where these
+rules are most likely to misfire.
 
-压舱石是最后那条：内置模板 × 5 语言 × 3 档位 × 有/无警示征象，违规数必须为 0。
-模板是校验失败时端给用户的东西，它自己不干净，整条兜底链路就没有意义。
+The ballast is the last one: built-in templates × 5 languages × 3 bands × with/without
+warning signs, and the violation count must be 0. The templates are what gets served to
+the user when verification fails; if they are not clean themselves, the whole fallback
+chain is pointless.
 """
 
 import pytest
@@ -25,7 +29,7 @@ TIERS = ("low", "medium", "high")
 
 
 def base_advice(language: str, tier: str = "medium") -> tuple[dict, str]:
-    """一份必然干净的建议 + summary（就是线上兜底用的那份模板）。"""
+    """A guaranteed-clean advice block + summary (the very template used as fallback)."""
     raw = fallback_advice(language, tier)
     return {k: list(v) for k, v in raw["advice"].items()}, raw["summary"]
 
@@ -36,10 +40,11 @@ def codes(violations) -> set[str]:
 
 def check(language: str, *, medical_extra: str = "", summary_extra: str = "",
           tier: str = "medium", warning_signs=()) -> set[str]:
-    """在干净模板上注入一句待测文本，返回违规码集合。
+    """Inject one sentence under test into a clean template; return the violation codes.
 
-    只改一句、其余保持干净，是为了让断言真正落在被测规则上：
-    出现别的 code 就说明注入的句子还踩了别的线，测试会立刻显形。
+    Changing one sentence and leaving the rest clean keeps the assertion on the rule
+    being tested: any other code means the injected sentence tripped something else as
+    well, and the test shows it immediately.
     """
     advice, summary = base_advice(language, tier)
     if medical_extra:
@@ -49,9 +54,10 @@ def check(language: str, *, medical_extra: str = "", summary_extra: str = "",
     return codes(verify_advice(advice, summary, language, tier, list(warning_signs)))
 
 
-# ---------- 规则 1：剂量 ----------
+# ---------- Rule 1: dosage ----------
 
-# 「避免阿司匹林/布洛芬」是**必须放行**的安全提示：它不带数字，不是处方。
+# "Avoid aspirin/ibuprofen" is a safety note that **must pass**: no numbers, not a
+# prescription.
 NO_DOSE_PHRASES = {
     "zh-CN": "退热镇痛请遵医嘱，避免自行服用阿司匹林或布洛芬类药物。",
     "zh-TW": "退燒止痛請遵醫囑，避免自行服用阿斯匹靈或布洛芬類藥物。",
@@ -100,9 +106,9 @@ def test_ordinary_numbers_are_not_dosages(text):
     assert "dosage" not in codes(verify_chat_reply(text, "en", []))
 
 
-# ---------- 规则 2：感染概率 ----------
+# ---------- Rule 2: infection probability ----------
 
-# 把百分比安到**这个人**头上 —— 必须拦
+# Pinning a percentage on **this person** -- must be blocked
 PERSONAL_PROBABILITY = {
     "zh-CN": "您感染登革热的概率大约是 42%。",
     "zh-TW": "您感染登革熱的機率大約是 42%。",
@@ -111,7 +117,7 @@ PERSONAL_PROBABILITY = {
     "pt": "Você tem 42% de probabilidade de estar infectado.",
 }
 
-# 群体层面的统计事实 —— 必须放行
+# A population-level statistical fact -- must be allowed
 POPULATION_STATISTIC = {
     "zh-CN": "在所有登革热病例中，约 90% 属于轻症。",
     "zh-TW": "在所有登革熱病例中，約 90% 屬於輕症。",
@@ -132,12 +138,13 @@ def test_population_statistic_is_allowed(language):
 
 
 def test_probability_needs_all_three_signals_in_one_sentence():
-    """百分比、概率措辞、第二人称——三者同句才算数。"""
+    """Percentage, probability wording and second person must share one sentence to count."""
     assert "probability" not in codes(verify_chat_reply("Your risk is 42%.", "en", []))
     assert "probability" not in codes(
         verify_chat_reply("The probability of severe dengue is low for you.", "en", [])
     )
-    # 分属两句也不算：统计事实 + 对用户说话，不构成「你的概率是 X%」
+    # Split across two sentences does not count either: a statistic plus talking to the
+    # user is not "your probability is X%"
     assert "probability" not in codes(
         verify_chat_reply("90% of cases are mild. Your scores are relative.", "en", [])
     )
@@ -146,7 +153,7 @@ def test_probability_needs_all_three_signals_in_one_sentence():
     )
 
 
-# ---------- 规则 3：就医紧迫性 ----------
+# ---------- Rule 3: urgency of seeking care ----------
 
 NO_URGENCY_MEDICAL = {
     "zh-CN": "多喝水、好好休息就可以了。",
@@ -172,18 +179,18 @@ def test_high_tier_template_says_seek_care(language):
 
 @pytest.mark.parametrize("language", LANGUAGES)
 def test_warning_signs_demand_urgency_even_at_low_tier(language):
-    """警示征象是独立于评分的：分数低也必须说去看医生。"""
+    """Warning signs are independent of the score: even a low score must say seek care."""
     advice, summary = base_advice(language, "low")
     advice["medical"] = [NO_URGENCY_MEDICAL[language]]
     got = codes(verify_advice(advice, summary, language, "low", ["VOMITO"]))
     assert "urgency_missing" in got
-    # 同一份文本，没有警示征象、档位也不高时不该被要求紧迫
+    # The same text, with no warning signs and a low band, must not be required to urge
     assert "urgency_missing" not in codes(
         verify_advice(advice, summary, language, "low", [])
     )
 
 
-# ---------- 规则 4：语言一致性 ----------
+# ---------- Rule 4: language consistency ----------
 
 
 @pytest.mark.parametrize("language", LANGUAGES)
@@ -210,17 +217,17 @@ def test_latin_text_declared_as_chinese_is_flagged(declared):
 
 
 def test_wrong_latin_language_needs_two_function_words():
-    """英文文本冒充西语：缺少 que/para/con/los/las 中的两个。"""
+    """English text passed off as Spanish: two of que/para/con/los/las are missing."""
     advice, summary = base_advice("en", "medium")
     assert "language_mismatch" in codes(verify_advice(advice, summary, "es", "medium", []))
-    # 反向：真西语模板不该被判成不是西语
+    # The other way round: a real Spanish template must not be judged as not Spanish
     es_advice, es_summary = base_advice("es", "medium")
     assert "language_mismatch" not in codes(
         verify_advice(es_advice, es_summary, "es", "medium", [])
     )
 
 
-# ---------- 规则 5：结构 ----------
+# ---------- Rule 5: structure ----------
 
 
 def test_empty_section_is_flagged():
@@ -246,13 +253,13 @@ def test_overlong_item_is_flagged():
     advice["monitoring"] = ["a" * (MAX_ITEM_CHARS + 1)]
     got = codes(verify_advice(advice, summary, "en", "low", []))
     assert "structure" in got
-    # 刚好到上限则放行
+    # Exactly at the limit passes
     advice["monitoring"] = ["a" * MAX_ITEM_CHARS]
     assert "structure" not in codes(verify_advice(advice, summary, "en", "low", []))
 
 
 def test_advice_may_be_a_pydantic_model_or_a_dict():
-    """校验器要能在 Pydantic 校验前后都跑得动。"""
+    """The verifier must run both before and after Pydantic validation."""
     from app.schemas import Advice
 
     raw, summary = base_advice("en", "medium")
@@ -260,22 +267,23 @@ def test_advice_may_be_a_pydantic_model_or_a_dict():
     assert verify_advice(Advice.model_validate(raw), summary, "en", "medium", []) == []
 
 
-# ---------- 压舱石：模板永远干净 ----------
+# ---------- Ballast: the templates are always clean ----------
 
 
 @pytest.mark.parametrize("language", LANGUAGES)
 @pytest.mark.parametrize("tier", TIERS)
 @pytest.mark.parametrize("warning_signs", [[], ["VOMITO", "PETEQUIA_N"]])
 def test_every_mock_template_has_zero_violations(language, tier, warning_signs):
-    """5 语言 × 3 档位 × 有无警示征象：内置模板必须一条违规都没有。
+    """5 languages × 3 bands × with/without warning signs: zero violations in a template.
 
-    这条测试守的是兜底链路的可信度——模型失败时端出去的就是这些文本。
+    This test guards the credibility of the fallback chain -- these are the very texts
+    served to the user when the model fails.
     """
     advice, summary = base_advice(language, tier)
     assert verify_advice(advice, summary, language, tier, warning_signs) == []
 
 
-# ---------- 追问回复：编造链接 ----------
+# ---------- Chat replies: invented links ----------
 
 WHO_URL = "https://www.who.int/emergencies/disease-outbreak-news/item/2024-DON518"
 OTHER_URL = "https://example.org/dengue"
@@ -287,7 +295,7 @@ def test_empty_reply_is_flagged():
 
 
 def test_any_url_is_fabricated_when_no_tool_returned_anything():
-    """空白名单 = 这轮没有任何来源，于是任何链接都是编的。"""
+    """An empty allow-list = no source at all this round, so every link is invented."""
     got = verify_chat_reply(f"See {WHO_URL} for details.", "en", [])
     assert codes(got) == {"fabricated_url"}
     assert "no tool returned" in got[0].message.lower() or "No source was returned" in got[0].message
@@ -326,7 +334,7 @@ def test_chat_reply_checks_dosage_and_probability_too():
     assert got == {"dosage", "probability"}
 
 
-# ---------- 违规消息本身 ----------
+# ---------- The violation messages themselves ----------
 
 
 def test_violation_messages_are_fed_back_to_the_model():

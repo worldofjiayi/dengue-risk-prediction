@@ -1,6 +1,8 @@
-"""评测数据回流（app/eval_log.py）与统计脚本（scripts/eval_stats.py）测试。
+"""Tests for the evaluation feedback logging (app/eval_log.py) and the stats script
+(scripts/eval_stats.py).
 
-全部在 MOCK_MODE 下运行，不发真实网络请求；回流文件写到 pytest 临时目录。
+Everything runs under MOCK_MODE with no real network requests; the log file is written to
+a pytest temporary directory.
 """
 
 import json
@@ -8,7 +10,7 @@ from datetime import date, datetime
 
 import pytest
 
-# notes 中故意放入敏感标记文本，用于断言原文不落盘
+# notes deliberately holds sensitive marker text, used to assert the raw text is not stored
 SENSITIVE_NOTE = "最近发热，身份证号110101199001010011，请保密。"
 
 VALID_FORM = {
@@ -35,7 +37,7 @@ def log_path(tmp_path):
 
 
 def _make_client(monkeypatch, eval_log_path: str):
-    """强制 MOCK_MODE=true 并指定回流路径后，构造 TestClient。"""
+    """Force MOCK_MODE=true, point the log at the given path, then build a TestClient."""
     monkeypatch.setenv("MOCK_MODE", "true")
     monkeypatch.setenv("EVAL_LOG_PATH", eval_log_path)
     from app.config import get_settings
@@ -59,7 +61,7 @@ def client(monkeypatch, log_path):
     get_settings.cache_clear()
 
 
-# ---------- 回流写入 ----------
+# ---------- Log writing ----------
 
 
 def test_assess_appends_sanitized_record(client, log_path):
@@ -72,7 +74,7 @@ def test_assess_appends_sanitized_record(client, log_path):
     assert len(lines) == 1
     record = json.loads(lines[0])
 
-    # 三个模型的评分与 API 响应一致
+    # The three model scores agree with the API response
     for field in ("dengue", "worsening", "severe"):
         assert record["scores"][field]["score"] == body[field]["score"]
         assert record["scores"][field]["level"] == body[field]["level"]
@@ -82,7 +84,7 @@ def test_assess_appends_sanitized_record(client, log_path):
     assert record["mock_mode"] is True
     assert record["epi_week"] == body["epi_week"]
 
-    # 26 个特征全部落盘，且与确定性编码一致
+    # All 26 features are stored, and match the deterministic encoding
     from app.ml_model import encode_features
     from app.schemas import FEATS, FormInput
 
@@ -90,11 +92,11 @@ def test_assess_appends_sanitized_record(client, log_path):
     assert record["features"] == expected
     assert set(record["features"]) == set(FEATS)
 
-    # 时间戳为可解析的带时区 ISO 格式
+    # The timestamp is a parseable ISO format carrying a timezone
     ts = datetime.fromisoformat(record["timestamp"])
     assert ts.tzinfo is not None
 
-    # notes 原文绝不落盘，仅保留 has_notes 标记
+    # The raw notes text is never stored; only the has_notes flag is kept
     assert record["has_notes"] is True
     assert "notes" not in record
     assert SENSITIVE_NOTE not in raw
@@ -102,18 +104,20 @@ def test_assess_appends_sanitized_record(client, log_path):
 
 
 def test_record_includes_exposure_answers_and_level(client, log_path):
-    """暴露答案与规则判出的等级都要落盘（分类答案，不可定位到个人）。"""
+    """Exposure answers and the rule-derived level are both stored (categorical answers,
+    which cannot identify an individual).
+    """
     assert client.post("/api/assess", json=VALID_FORM).status_code == 200
     record = json.loads(log_path.read_text(encoding="utf-8").splitlines()[0])
 
     assert record["exposure"] == {
         "FEVER_CLUSTER": "no",
         "CONFIRMED_CASE": "yes",
-        "OUTBREAK_TRAVEL": "unknown",  # 未作答的键补为 unknown
+        "OUTBREAK_TRAVEL": "unknown",  # keys left unanswered are filled in as unknown
     }
     assert record["exposure_level"] == "high"
 
-    # 暴露答案绝不能混进 26 维特征
+    # Exposure answers must never leak into the 26 features
     from app.schemas import EXPOSURE_CODES, FEATS
 
     assert set(record["features"]) == set(FEATS)
@@ -121,7 +125,7 @@ def test_record_includes_exposure_answers_and_level(client, log_path):
 
 
 def test_record_exposure_level_matches_response(client, log_path):
-    """回流里的暴露等级与 API 返回的 exposure_context 一致。"""
+    """The logged exposure level agrees with the exposure_context the API returns."""
     body = client.post(
         "/api/assess",
         json={**VALID_FORM, "exposure": {"FEVER_CLUSTER": "yes"}},
@@ -156,7 +160,7 @@ def test_multiple_assessments_append(client, log_path):
 
 
 def test_empty_path_disables_logging(monkeypatch, tmp_path):
-    """EVAL_LOG_PATH 置空时关闭回流，默认相对路径也不会被创建。"""
+    """An empty EVAL_LOG_PATH disables logging; the default relative path is not created."""
     import app.eval_log as eval_log
 
     monkeypatch.setattr(eval_log, "_ROOT", tmp_path)
@@ -171,7 +175,7 @@ def test_empty_path_disables_logging(monkeypatch, tmp_path):
 
 
 def test_write_failure_does_not_break_assess(monkeypatch, tmp_path):
-    """回流路径不可写（指向目录）时评估仍正常返回 200。"""
+    """When the log path is unwritable (it points at a directory), assess still returns 200."""
     with _make_client(monkeypatch, str(tmp_path)) as c:
         resp = c.post("/api/assess", json=VALID_FORM)
 
@@ -183,7 +187,7 @@ def test_write_failure_does_not_break_assess(monkeypatch, tmp_path):
 
 
 def test_relative_path_resolves_to_project_root(monkeypatch, tmp_path):
-    """相对路径相对项目根目录（而非当前工作目录）解析。"""
+    """A relative path resolves against the project root, not the current working directory."""
     import app.eval_log as eval_log
 
     monkeypatch.setattr(eval_log, "_ROOT", tmp_path)
@@ -196,7 +200,7 @@ def test_relative_path_resolves_to_project_root(monkeypatch, tmp_path):
     assert (tmp_path / "data" / "assessments.jsonl").is_file()
 
 
-# ---------- 统计脚本 ----------
+# ---------- Stats script ----------
 
 
 def _record(
@@ -224,7 +228,7 @@ def _record(
         },
         "has_notes": False,
     }
-    # exposure_level=None 模拟加入暴露问题之前的旧记录
+    # exposure_level=None simulates an old record from before the exposure questions existed
     if exposure_level is not None:
         record["exposure"] = {
             "FEVER_CLUSTER": "yes" if exposure_level == "medium" else "no",
@@ -256,12 +260,12 @@ def test_compute_stats():
     assert dengue["median"] == 35.0
     assert dengue["levels"]["low"] == {"count": 2, "percent": 50.0}
     assert dengue["levels"]["high"] == {"count": 1, "percent": 25.0}
-    # 直方图：100 分归入最后一档 [90-100]
+    # Histogram: a score of 100 lands in the last band [90-100]
     assert dengue["histogram"]["[10-20)"] == 1
     assert dengue["histogram"]["[90-100]"] == 1
     assert sum(dengue["histogram"].values()) == 4
 
-    # 重症模型独立统计
+    # The severe model is counted on its own
     assert stats["models"]["severe"]["max"] == 95.0
 
     assert stats["languages"] == {"en": 1, "zh-CN": 3}
@@ -292,11 +296,11 @@ def test_compute_stats_exposure_level_distribution():
 
 
 def test_compute_stats_ignores_records_without_exposure_level():
-    """加入暴露问题之前的旧记录不该被计成某个档位。"""
+    """Old records from before the exposure questions must not be counted into a band."""
     from scripts.eval_stats import compute_stats
 
     records = [
-        _record(10.0, 5.0, "low", exposure_level=None),   # 旧记录
+        _record(10.0, 5.0, "low", exposure_level=None),   # old record
         _record(50.0, 45.0, "medium", exposure_level="high"),
     ]
     stats = compute_stats(records)
@@ -357,7 +361,7 @@ def test_eval_stats_main_missing_file(tmp_path, capsys):
 
 
 def test_record_uses_real_epi_week(client, log_path):
-    """回流记录里的 epi_week 与模型使用的一致。"""
+    """The epi_week in the logged record is the same one the model uses."""
     from app.ml_model import get_epi_week
 
     assert client.post("/api/assess", json=VALID_FORM).status_code == 200

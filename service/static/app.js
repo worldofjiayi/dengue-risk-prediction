@@ -1,21 +1,24 @@
 'use strict';
 
 /* =========================================================
- * 登革热风险自测 — 前端逻辑
+ * Dengue risk self-assessment - front-end logic
  *
- * 问卷字段与后端契约严格一致（app/schemas.py）：
+ * The questionnaire fields align strictly with the back-end contract
+ * (app/schemas.py):
  *   age(0-110) / sex(F|M) / day_ill(0-14)
- *   symptoms      —— 14 项，每项 yes | no | unknown
- *   comorbidities —— 7 项，每项 yes | no | unknown
- *   exposure      —— 3 项，每项 yes | no | unknown（**不参与模型打分**）
+ *   symptoms      -- 14 items, each yes | no | unknown
+ *   comorbidities -- 7 items, each yes | no | unknown
+ *   exposure      -- 3 items, each yes | no | unknown (**takes no part in scoring**)
  *   language / notes
  *
- * 「不知道」在模型里与「无」同为 0（训练数据 SINAN 9=未知 记 0），
- * 所以未作答可以直接提交，不强制用户回答症状题。
+ * "Don't know" is 0 in the model, the same as "no" (the SINAN training data's
+ * 9=unknown is recorded as 0), so an unanswered form can be submitted as-is and
+ * users are never forced to answer the symptom questions.
  *
- * 流行病学暴露（exposure）在 SINAN 训练数据里不存在，没有系数可用，
- * 后端把它放进独立的规则通道 exposure_context，前端也必须区别呈现：
- * 它不是模型评分，不能长得像仪表盘。
+ * Epidemiological exposure does not exist in the SINAN training data and has no
+ * coefficient available, so the back end puts it in a separate rule-based channel,
+ * exposure_context. The front end must present it differently too: it is not a
+ * model score and must not be made to look like a gauge.
  * ========================================================= */
 
 const LANGS = [
@@ -28,7 +31,7 @@ const LANGS = [
 
 const DEFAULT_LANG = 'zh-CN';
 
-// 与后端 SYMPTOM_CODES / COMORB_CODES 一致
+// Matches the back end's SYMPTOM_CODES / COMORB_CODES
 const SYMPTOM_CODES = [
   'FEBRE', 'MIALGIA', 'CEFALEIA', 'EXANTEMA', 'VOMITO', 'NAUSEA', 'DOR_COSTAS',
   'CONJUNTVIT', 'ARTRITE', 'ARTRALGIA', 'PETEQUIA_N', 'LEUCOPENIA', 'LACO', 'DOR_RETRO',
@@ -36,26 +39,28 @@ const SYMPTOM_CODES = [
 const COMORB_CODES = [
   'DIABETES', 'HEMATOLOG', 'HEPATOPAT', 'RENAL', 'HIPERTENSA', 'ACIDO_PEPT', 'AUTO_IMUNE',
 ];
-// 流行病学暴露：走后端的规则通道，不进模型
+// Epidemiological exposure: goes down the back end's rule channel, not into the model
 const EXPOSURE_CODES = ['FEVER_CLUSTER', 'CONFIRMED_CASE', 'OUTBREAK_TRAVEL'];
 
-// 三态作答的字段类别（用于计数、批量填「无」等通用逻辑）
+// Field categories with three-state answers (used by generic logic such as counting
+// and bulk-filling "no")
 const TRI_KINDS = ['symptoms', 'comorbidities', 'exposure'];
 
-// 智能问诊（自适应模式）：
-// - VOMITO / PETEQUIA_N 是 WHO 警示征象，人人必问（安全阶段）
-// - 自适应环节最多问 ADAPTIVE_CAP 题
-// - /api/plan 超过 PLAN_TIMEOUT_MS 或出错就静默退回完整问卷
+// Smart interview (adaptive mode):
+// - VOMITO / PETEQUIA_N are WHO warning signs and are asked of everyone (safety stage)
+// - the adaptive stage asks at most ADAPTIVE_CAP questions
+// - if /api/plan exceeds PLAN_TIMEOUT_MS or errors, silently fall back to the full
+//   questionnaire
 const SAFETY_CODES = ['VOMITO', 'PETEQUIA_N'];
 const ADAPTIVE_STAGES = ['basic', 'safety', 'exposure', 'loop', 'notes'];
 const ADAPTIVE_CAP = 12;
 const PLAN_TIMEOUT_MS = 6000;
 const PLAN_KIND_MAP = { symptom: 'symptoms', comorbidity: 'comorbidities' };
 
-// 模型贡献项里 5 个非二值特征（code 保留原名，不带 _x）
+// The 5 non-binary features in the model contributions (code keeps its own name, no _x)
 const NON_BINARY_FEATS = ['age', 'sex_f', 'day_ill', 'wk_sin', 'wk_cos'];
 
-// 七步问卷结构（note 为 I18N 顶层键名）
+// The seven-step questionnaire structure (note is a top-level I18N key name)
 const STEPS = [
   { id: 'basic', kind: 'basic' },
   { id: 'common', kind: 'symptoms', codes: ['FEBRE', 'CEFALEIA', 'MIALGIA', 'ARTRALGIA', 'DOR_RETRO', 'DOR_COSTAS'] },
@@ -66,36 +71,42 @@ const STEPS = [
   { id: 'notes', kind: 'notes' },
 ];
 
-// 结果页三个模型指标 ↔ explanations 的键
+// The result page's three model metrics <-> the keys of explanations
 const METRICS = ['dengue', 'worsening', 'severe'];
 
-// 建议展示顺序：就医 → 监测 → 防护（与后端 Advice 字段顺序一致）
+// Advice display order: seek care -> monitoring -> protection (matching the field order
+// of the back end's Advice)
 const ADVICE_ORDER = ['medical', 'monitoring', 'protection'];
 
-// 对话：最多回传最近 6 条历史，问题上限 500 字（与 app/schemas.py 一致）
+// Chat: send back at most the 6 most recent history entries, question capped at 500
+// characters (matching app/schemas.py)
 const CHAT_HISTORY_MAX = 6;
 const CHAT_QUESTION_MAX = 500;
 
 /*
- * 目的地查询（第二条用户路径）——/api/destination 契约：
- *   请求 { location: str(1..120), language }
- *   响应 { location, matched, endemicity, season_note, who_notices[],
- *          recent_findings[], sources[], advice{}, search_status,
- *          disclaimer, model_note }
+ * Destination lookup (the second user path) -- the /api/destination contract:
+ *   request  { location: str(1..120), language }
+ *   response { location, matched, endemicity, season_note, who_notices[],
+ *              recent_findings[], sources[], advice{}, search_status,
+ *              disclaimer, model_note }
  *
- * 后端**刻意不返回任何评分**：一张国家级参考表撑不起 0–100 的数字。
- * 前端也绝不能自己造一个：这一页没有仪表盘、没有分数，只有定性徽章。
+ * The back end **deliberately returns no score at all**: a country-level reference
+ * table cannot support a 0-100 number. The front end must not invent one either:
+ * this page has no gauge and no score, only qualitative badges.
  *
- * 三层信息的可信度递减，必须分开标注：
- *   endemicity/season_note → 稳定参考知识；
- *   who_notices            → 世卫官方通报，**每条都要显示真实日期**（有些是数年前的）；
- *   recent_findings        → 模型联网检索近约三个月的结果，可能为空。
+ * The three layers of information decrease in trustworthiness and must be labelled
+ * separately:
+ *   endemicity/season_note -> stable reference knowledge;
+ *   who_notices            -> official WHO notices, **every one must show its real
+ *                             date** (some are years old);
+ *   recent_findings        -> results from the model's web search covering roughly the
+ *                             last three months; may be empty.
  */
 const DEST_LOCATION_MAX = 120;
 const DEST_MIN_WAIT_MS = 900;
 const ENDEMICITY_LEVELS = ['high', 'moderate', 'low', 'none', 'unknown'];
 
-/* --------------------------------------------------------- 文案 */
+/* --------------------------------------------------------- Copy */
 
 const I18N = {
   'zh-CN': {
@@ -1414,10 +1425,11 @@ const I18N = {
   },
 };
 
-// 隐私条目里需要加粗的两条（各语言顺序一致）：不保存自由文本、AI 会外发摘要
+// The two privacy items that need bolding (the order is the same in every language):
+// free text is not stored, and the AI sends a summary off-site
 const PRIVACY_KEY_ITEMS = [2, 5];
 
-/* --------------------------------------------------------- 状态 */
+/* --------------------------------------------------------- State */
 
 function freshAnswers() {
   const symptoms = {};
@@ -1434,27 +1446,29 @@ function freshChat() {
 }
 
 /**
- * 目的地查询的状态。它跨视图存活（做完症状自评后，结果页要能引用本次
- * 会话查过的目的地），所以 resetWizard 不清空它。
+ * State of the destination lookup. It survives across views (after finishing the
+ * symptom self-assessment, the result page needs to be able to refer to a destination
+ * looked up during this session), so resetWizard does not clear it.
  */
 function freshDestination() {
   return {
-    query: '',      // 输入框里的内容
-    location: '',   // 最近一次真正提交的地点（重试用）
-    data: null,     // /api/destination 的响应
+    query: '',      // what is in the input box
+    location: '',   // the most recently submitted location (for retries)
+    data: null,     // the /api/destination response
     loading: false,
     error: null,    // { kind } | { status, detail }
-    hint: false,    // 输入为空的提示是否可见（切换语言要跟着换语言）
-    seq: 0,         // 请求序号，丢弃过期响应
-    from: 'hero',   // 从哪个视图进来的，决定「返回」去哪
+    hint: false,    // whether the empty-input hint is visible (must follow language changes)
+    seq: 0,         // request sequence number, for discarding stale responses
+    from: 'hero',   // which view we came in from, deciding where "back" goes
   };
 }
 
 /**
- * 「已作答」标记，独立于 answers 的取值：
- * answers 里所有三态题默认就是 'unknown'，无法区分「用户明确选了不知道」
- * 和「压根没问过」。/api/plan 的契约是：出现的键 = 已作答（yes/no/unknown
- * 都算），缺席的键 = 还没问 —— 所以必须单独记录。
+ * The "answered" markers, kept separate from the values in answers:
+ * every three-state question in answers defaults to 'unknown', which cannot
+ * distinguish "the user explicitly chose don't know" from "never asked at all".
+ * The /api/plan contract is: a key present = answered (yes/no/unknown all count),
+ * a key absent = not asked yet -- so this has to be recorded separately.
  */
 function freshAnsweredSet() {
   return { symptoms: {}, comorbidities: {}, exposure: {} };
@@ -1463,24 +1477,24 @@ function freshAnsweredSet() {
 function freshAdaptive() {
   return {
     stage: 'basic',    // basic → safety → exposure → loop → notes
-    current: null,     // 当前问题 { kind, code, why }
-    loopCount: 0,      // 自适应环节已答题数（不含安全/暴露阶段）
-    bounds: null,      // 最近一次 /api/plan 的 bounds
+    current: null,     // the current question { kind, code, why }
+    loopCount: 0,      // questions answered in the adaptive stage (excluding safety/exposure)
+    bounds: null,      // bounds from the most recent /api/plan
     stopReason: null,  // 'proven' | 'cap' | 'nomore'
-    planning: false,   // /api/plan 请求进行中
-    planSeq: 0,        // 请求序号，丢弃过期响应
+    planning: false,   // an /api/plan request is in flight
+    planSeq: 0,        // request sequence number, for discarding stale responses
   };
 }
 
 const state = {
   lang: DEFAULT_LANG,
-  mode: 'adaptive', // 'adaptive' | 'classic'，init 里读 localStorage
+  mode: 'adaptive', // 'adaptive' | 'classic'; init reads this from localStorage
   step: 0,
   answers: freshAnswers(),
   answered: freshAnsweredSet(),
   adaptive: freshAdaptive(),
   submitting: false,
-  // 三个贡献项面板的展开状态（切换语言后要保留）
+  // Expanded state of the three contribution panels (must survive a language change)
   openExplain: { dengue: false, worsening: false, severe: false },
   chat: freshChat(),
   destination: freshDestination(),
@@ -1492,7 +1506,7 @@ let loadingTimer = null;
 let destLoadingTimer = null;
 let lastFocusBeforeModal = null;
 
-/* --------------------------------------------------------- 工具 */
+/* --------------------------------------------------------- Utilities */
 
 const $ = (id) => document.getElementById(id);
 const T = () => I18N[state.lang];
@@ -1504,8 +1518,9 @@ function itemText(kind, code) {
 }
 
 /**
- * 把后端 explanations 里的 code 翻译成人话。
- * 症状 / 合并症去掉 _x 后查表；5 个非二值特征查 features 表。
+ * Turn a code from the back end's explanations into human-readable text.
+ * Symptoms / comorbidities are looked up after dropping the _x suffix; the 5
+ * non-binary features are looked up in the features table.
  */
 function featureLabel(code) {
   const t = T();
@@ -1530,30 +1545,30 @@ function mapNavLang(tag) {
 
 function detectLang() {
   let saved = null;
-  try { saved = localStorage.getItem('lang'); } catch (_) { /* 忽略 */ }
+  try { saved = localStorage.getItem('lang'); } catch (_) { /* ignore */ }
   if (saved && I18N[saved]) return saved;
   return mapNavLang(navigator.language);
 }
 
 function persistLang(code) {
-  try { localStorage.setItem('lang', code); } catch (_) { /* 忽略 */ }
+  try { localStorage.setItem('lang', code); } catch (_) { /* ignore */ }
 }
 
 function detectMode() {
   let saved = null;
-  try { saved = localStorage.getItem('mode'); } catch (_) { /* 忽略 */ }
+  try { saved = localStorage.getItem('mode'); } catch (_) { /* ignore */ }
   return saved === 'classic' || saved === 'adaptive' ? saved : 'adaptive';
 }
 
 function persistMode(mode) {
-  try { localStorage.setItem('mode', mode); } catch (_) { /* 忽略 */ }
+  try { localStorage.setItem('mode', mode); } catch (_) { /* ignore */ }
 }
 
 function markAnswered(kind, code) {
   if (state.answered[kind]) state.answered[kind][code] = true;
 }
 
-/* --------------------------------------------------------- 视图切换 */
+/* --------------------------------------------------------- View switching */
 
 const VIEWS = ['hero', 'wizard', 'loading', 'result', 'destination'];
 
@@ -1564,7 +1579,7 @@ function showView(name) {
   window.scrollTo({ top: 0, behavior: 'instant' in window ? 'instant' : 'auto' });
 }
 
-/* --------------------------------------------------------- 语言 */
+/* --------------------------------------------------------- Language */
 
 function setLanguage(code) {
   if (!I18N[code]) code = DEFAULT_LANG;
@@ -1577,7 +1592,7 @@ function setLanguage(code) {
   const meta = document.querySelector('meta[name="description"]');
   if (meta) meta.setAttribute('content', t.metaDescription);
 
-  // 语言切换器
+  // Language switcher
   const current = LANGS.find((l) => l.code === code);
   $('lang-current').textContent = current ? current.name : code;
   $('lang-toggle').setAttribute('aria-label', t.langLabel);
@@ -1588,7 +1603,7 @@ function setLanguage(code) {
     btn.classList.toggle('is-current', on);
   });
 
-  // Hero（两条入口：目的地查询 / 症状自评）
+  // Hero (two entry points: destination lookup / symptom self-assessment)
   $('hero-badge').textContent = t.hero.badge;
   $('hero-title').innerHTML = t.hero.title;
   $('hero-subtitle').textContent = t.hero.subtitle;
@@ -1600,7 +1615,7 @@ function setLanguage(code) {
   $('hero-privacy-text').textContent = t.hero.privacy;
   $('btn-privacy').textContent = t.hero.privacyLink;
 
-  // Wizard 静态部分
+  // Static parts of the wizard
   $('wizard-brand').textContent = t.brand;
   $('btn-prev').textContent = t.nav.prev;
   document.querySelector('.progress').setAttribute('aria-label', t.a11y.progress);
@@ -1611,7 +1626,7 @@ function setLanguage(code) {
   // Loading
   $('loading-sub').textContent = t.loading.sub;
 
-  // Result 静态部分
+  // Static parts of the result page
   $('result-title').textContent = t.result.title;
   $('result-sub').textContent = t.result.sub;
   $('label-dengue').textContent = t.result.dengue;
@@ -1624,7 +1639,7 @@ function setLanguage(code) {
   $('btn-restart').textContent = t.result.restart;
   $('btn-home').textContent = t.result.home;
 
-  // 对话面板静态部分
+  // Static parts of the chat panel
   $('chat-title').textContent = t.chat.title;
   $('chat-sub').textContent = t.chat.sub;
   $('chat-empty').textContent = t.chat.empty;
@@ -1636,30 +1651,31 @@ function setLanguage(code) {
   $('chat-note').textContent = t.chat.note;
   $('btn-privacy-chat').textContent = t.chat.privacyLink;
 
-  // 错误浮层
+  // Error overlay
   $('error-title').textContent = t.errors.title;
   $('btn-retry').textContent = t.errors.retry;
   $('btn-error-close').textContent = t.errors.back;
 
-  // 隐私浮层
+  // Privacy overlay
   renderPrivacy();
 
-  // 免责声明（结果页优先用后端返回的）
+  // Disclaimer (the result page prefers whatever the back end returned)
   $('disclaimer-bar').textContent =
     (lastResult && lastResult.disclaimer) || t.disclaimer;
 
-  // 重渲染动态内容（智能/完整两种模式各自恢复当前进度）
+  // Re-render dynamic content (smart and full modes each restore their own progress)
   if (!$('view-wizard').hidden) renderWizard(null);
   if (!$('view-result').hidden && lastResult) renderResult(lastResult, { animate: false });
   if (!$('error-overlay').hidden && lastError) renderError();
-  // 目的地视图：整页就地重渲染，输入内容与已取回的结果都保留
+  // Destination view: re-render the whole page in place; both the input and any
+  // results already fetched are preserved
   renderDestination();
   renderTravelContext();
   renderChatChips();
   renderChatLog();
 }
 
-/* --------------------------------------------------------- 问卷渲染 */
+/* --------------------------------------------------------- Questionnaire rendering */
 
 function answeredCount(step) {
   if (TRI_KINDS.indexOf(step.kind) === -1) return null;
@@ -1719,7 +1735,7 @@ function renderBasicStep(host) {
   const t = T();
   const a = state.answers;
 
-  // 年龄
+  // Age
   const ageBlock = document.createElement('div');
   ageBlock.className = 'field-block';
   const ageHead = document.createElement('div');
@@ -1745,7 +1761,7 @@ function renderBasicStep(host) {
   });
   ageBlock.append(ageHead, ageInput);
 
-  // 性别
+  // Sex
   const sexBlock = document.createElement('div');
   sexBlock.className = 'field-block';
   const sexLabel = document.createElement('div');
@@ -1782,7 +1798,7 @@ function renderBasicStep(host) {
   });
   sexBlock.append(sexLabel, sexOpts);
 
-  // 病程天数
+  // Days of illness
   const dayBlock = document.createElement('div');
   dayBlock.className = 'field-block';
   const dayHead = document.createElement('div');
@@ -1859,7 +1875,7 @@ function renderStep(direction) {
   if (direction === 'forward') wrap.classList.add('slide-in-right');
   else if (direction === 'back') wrap.classList.add('slide-in-left');
 
-  // 标题
+  // Heading
   const head = document.createElement('header');
   head.className = 'step-head';
   const h2 = document.createElement('h2');
@@ -1872,7 +1888,7 @@ function renderStep(direction) {
   head.append(h2, sub);
   wrap.appendChild(head);
 
-  // 步骤补充说明（临床项 / 流行病学暴露）
+  // Extra notes for this step (clinical items / epidemiological exposure)
   if (step.note && t[step.note]) {
     const note = document.createElement('p');
     note.className = 'step-note';
@@ -1885,7 +1901,7 @@ function renderStep(direction) {
   } else if (step.kind === 'notes') {
     renderNotesStep(wrap);
   } else {
-    // 批量「无」快捷键
+    // Bulk "no" shortcut
     const bulk = document.createElement('button');
     bulk.type = 'button';
     bulk.className = 'bulk-btn';
@@ -1909,7 +1925,8 @@ function renderStep(direction) {
   updateStepMeta();
   hideHint();
 
-  // 导航按钮（智能模式可能隐藏过，这里恢复完整问卷的形态）
+  // Navigation buttons (smart mode may have hidden them; restore the full
+  // questionnaire's layout here)
   document.querySelector('.wizard-nav').hidden = false;
   $('btn-prev').hidden = false;
   $('btn-prev').disabled = state.step === 0;
@@ -1976,12 +1993,15 @@ function goStep(index, direction) {
   renderStep(direction);
 }
 
-/* --------------------------------------------------------- 智能问诊（自适应模式） */
+/* --------------------------------------------------------- Smart interview (adaptive mode) */
 /*
- * /api/plan 契约：请求里只放「已作答」的题（yes/no/unknown 都算作答，
- * 没问过的键必须缺席）；响应给出三个模型的评分上下界 bounds、can_stop、
- * 以及最多 5 个候选下一题 next。任何失败（含 6 秒超时、404）都静默退回
- * 完整问卷，已答内容全部带过去 —— 智能模式只是增强，绝不能挡住用户。
+ * The /api/plan contract: the request carries only the questions that have been
+ * answered (yes/no/unknown all count as answered, and keys never asked must be
+ * absent); the response gives bounds -- the upper and lower score bounds for the three
+ * models -- plus can_stop and up to 5 candidate next questions in next.
+ * Any failure (including a 6-second timeout, or a 404) silently falls back to the full
+ * questionnaire, carrying every answer across -- smart mode is only an enhancement and
+ * must never get in the user's way.
  */
 
 function renderWizard(direction) {
@@ -2005,8 +2025,10 @@ function updateModeToggle() {
 }
 
 /**
- * 切换问诊模式。答案完全共享：完整问卷显示已答内容，切回智能模式重新规划。
- * opts.persist=false 用于静默回退（不是用户的主动选择，不写入偏好）。
+ * Switch interview mode. Answers are fully shared: the full questionnaire shows what
+ * has been answered, and switching back to smart mode re-plans from there.
+ * opts.persist=false is for a silent fallback (not the user's own choice, so it is not
+ * written to their preferences).
  */
 function setMode(mode, opts) {
   if (mode !== 'adaptive' && mode !== 'classic') mode = 'adaptive';
@@ -2018,7 +2040,7 @@ function setMode(mode, opts) {
   else renderStep(null);
 }
 
-/** 根据已答内容决定进入智能模式的哪个阶段。 */
+/** Decide which stage of smart mode to enter, based on what has been answered. */
 function computeAdaptiveStage() {
   if (!state.answers.sex) return 'basic';
   if (!SAFETY_CODES.every((c) => state.answered.symptoms[c])) return 'safety';
@@ -2035,7 +2057,7 @@ function enterAdaptive() {
   if (ad.stage === 'loop') advancePlan();
 }
 
-/** /api/plan 请求体：只包含用户真正作答过的题。 */
+/** The /api/plan request body: only the questions the user has genuinely answered. */
 function buildPlanPayload() {
   const a = state.answers;
   const symptoms = {};
@@ -2075,7 +2097,7 @@ async function fetchPlan() {
   }
 }
 
-/** 从 next 里挑第一个我们认识、且还没答过的问题。 */
+/** Pick the first question from next that we recognise and that is not yet answered. */
 function pickNext(plan) {
   const list = Array.isArray(plan.next) ? plan.next : [];
   for (let i = 0; i < list.length; i += 1) {
@@ -2110,7 +2132,7 @@ function stepHead(title, subText) {
   return head;
 }
 
-/** 三条「区间收窄」轨道（dengue / worsening / severe）。 */
+/** The three "interval narrowing" tracks (dengue / worsening / severe). */
 function buildTracksBlock(title, hint) {
   const t = T();
   const wrap = document.createElement('div');
@@ -2174,7 +2196,8 @@ function buildTracksBlock(title, hint) {
   return wrap;
 }
 
-/** 用最新 bounds 更新轨道：色带位置/宽度靠 CSS 过渡自然收窄。 */
+/** Update the tracks from the latest bounds: the band's position and width narrow
+ *  naturally via CSS transitions. */
 function updateTracks(bounds) {
   if (!bounds || typeof bounds !== 'object') return;
   const clamp = (v) => Math.max(0, Math.min(100, Number(v) || 0));
@@ -2196,7 +2219,8 @@ function updateTracks(bounds) {
 
     const band = $(`nr-band-${m}`);
     if (band) {
-      // 已确定：色带收拢到当前值上（宽度归零 + 淡出），只留圆点
+      // Decided: the band collapses onto the current value (width to zero, fading out),
+      // leaving only the dot
       band.style.left = `${decided ? now : lo}%`;
       band.style.width = `${decided ? 0 : Math.max(0, hi - lo)}%`;
     }
@@ -2212,7 +2236,8 @@ function updateTracks(bounds) {
   });
 }
 
-/** 渲染当前问题卡片；没有问题时按 planning 状态显示加载点或留空。 */
+/** Render the current question card; with no question, show loading dots or nothing,
+ *  depending on the planning state. */
 function renderQuestion(focusQuestion) {
   const host = $('aq-host');
   if (!host) return;
@@ -2289,7 +2314,7 @@ function setQuestionBusy(busy) {
   document.querySelectorAll('.aq-opt').forEach((b) => { b.disabled = busy; });
 }
 
-/** 回答当前问题（点击或按键 1/2/3），然后重新规划。 */
+/** Answer the current question (by click or by pressing 1/2/3), then re-plan. */
 function answerCurrent(value) {
   const ad = state.adaptive;
   if (ad.stage !== 'loop' || !ad.current || ad.planning) return;
@@ -2297,24 +2322,27 @@ function answerCurrent(value) {
   state.answers[q.kind][q.code] = value;
   markAnswered(q.kind, q.code);
   ad.loopCount += 1;
-  // 注意：current 保留到新计划到达，旧卡片禁用即可，避免闪加载点
+  // Note: current is kept until the new plan arrives; disabling the old card is enough,
+  // and it avoids a flash of loading dots
   advancePlan();
 }
 
-/** 请求 /api/plan 并推进流程：更新轨道 → 停止或展示下一题。 */
+/** Request /api/plan and advance: update the tracks, then either stop or show the next
+ *  question. */
 async function advancePlan() {
   const ad = state.adaptive;
   ad.planSeq += 1;
   const seq = ad.planSeq;
   ad.planning = true;
   setQuestionBusy(true);
-  if (!ad.current) renderQuestion(false); // 刚进入循环：显示加载点
+  if (!ad.current) renderQuestion(false); // just entered the loop: show loading dots
 
   let plan = null;
   try {
     plan = await fetchPlan();
   } catch (_) {
-    // /api/plan 不可用（404、超时、格式异常……）：静默退回完整问卷
+    // /api/plan unavailable (404, timeout, malformed response...): silently fall back
+    // to the full questionnaire
     if (state.adaptive === ad && seq === ad.planSeq) {
       ad.planning = false;
       if (state.mode === 'adaptive' && ad.stage === 'loop') fallbackToClassic();
@@ -2322,7 +2350,8 @@ async function advancePlan() {
     return;
   }
 
-  // 丢弃过期响应（期间用户重置、切换了模式或语言重新请求过）
+  // Discard stale responses (the user may have reset, switched mode, or changed
+  // language and re-requested in the meantime)
   if (state.adaptive !== ad || seq !== ad.planSeq) return;
   ad.planning = false;
   if (state.mode !== 'adaptive' || ad.stage !== 'loop') return;
@@ -2347,7 +2376,8 @@ function stopLoop(reason) {
   renderAdaptive('forward');
 }
 
-/** 智能模式失败时的静默降级：保留全部已答内容，转完整问卷。 */
+/** Silent degradation when smart mode fails: keep every answer and move to the full
+ *  questionnaire. */
 function fallbackToClassic() {
   state.adaptive.current = null;
   state.adaptive.planning = false;
@@ -2419,7 +2449,8 @@ function updateAdaptiveMeta() {
   }));
 }
 
-/** 渲染智能模式当前阶段（语言切换时也走这里，状态全部保留）。 */
+/** Render the current stage of smart mode (a language change comes through here too,
+ *  with all state preserved). */
 function renderAdaptive(direction) {
   const t = T();
   const ad = state.adaptive;
@@ -2448,7 +2479,8 @@ function renderAdaptive(direction) {
     SAFETY_CODES.forEach((code) => list.appendChild(makeTriRow('symptoms', code)));
     wrap.appendChild(list);
   } else if (ad.stage === 'exposure') {
-    // 与完整问卷第 5 步完全同源：同样的 code、文案与说明
+    // Exactly the same source as step 5 of the full questionnaire: same codes, same copy,
+    // same notes
     head = stepHead(t.steps.exposure.title, t.steps.exposure.sub);
     wrap.appendChild(head);
     const note = document.createElement('p');
@@ -2467,7 +2499,8 @@ function renderAdaptive(direction) {
     host.id = 'aq-host';
     wrap.appendChild(host);
   } else {
-    // notes：停止原因 + 最终区间 + 补充说明 + 转完整问卷的入口
+    // notes: stop reason + final interval + free-text notes + the way into the full
+    // questionnaire
     head = stepHead(t.steps.notes.title, t.steps.notes.sub);
     wrap.appendChild(head);
     if (ad.stopReason) {
@@ -2491,7 +2524,8 @@ function renderAdaptive(direction) {
     moreBtn.className = 'link-btn';
     moreBtn.textContent = t.adaptive.continueFull;
     moreBtn.addEventListener('click', () => {
-      // 想再补答就转完整问卷；这不是模式偏好，不写入 localStorage
+      // Answering more means switching to the full questionnaire; this is not a mode
+      // preference and is not written to localStorage
       if (state.answers.sex) state.step = Math.max(state.step, 1);
       setMode('classic', { persist: false });
     });
@@ -2501,14 +2535,16 @@ function renderAdaptive(direction) {
 
   panel.replaceChildren(wrap);
 
-  // 轨道与问题卡片要在 DOM 挂载后再填充（依赖 getElementById）
+  // The tracks and question card must be filled in after the DOM is mounted (they rely
+  // on getElementById)
   if ((ad.stage === 'loop' || ad.stage === 'notes') && ad.bounds) updateTracks(ad.bounds);
   if (ad.stage === 'loop') renderQuestion(false);
 
   updateAdaptiveMeta();
   hideHint();
 
-  // 导航：循环阶段由答题按钮驱动，隐藏整个导航条
+  // Navigation: during the loop stage the answer buttons drive it, so hide the whole
+  // navigation bar
   const nav = document.querySelector('.wizard-nav');
   nav.hidden = ad.stage === 'loop';
   const prev = $('btn-prev');
@@ -2519,7 +2555,7 @@ function renderAdaptive(direction) {
   if (head) head.querySelector('.step-title').focus({ preventScroll: true });
 }
 
-/* --------------------------------------------------------- 提交 */
+/* --------------------------------------------------------- Submission */
 
 function buildPayload() {
   const a = state.answers;
@@ -2529,7 +2565,7 @@ function buildPayload() {
     day_ill: a.dayIll,
     symptoms: { ...a.symptoms },
     comorbidities: { ...a.comorbidities },
-    // 不参与模型打分，后端用规则转成 exposure_context
+    // Takes no part in model scoring; the back end turns it into exposure_context by rule
     exposure: { ...a.exposure },
     language: state.lang,
     notes: a.notes.trim().slice(0, 500),
@@ -2573,7 +2609,7 @@ async function submit() {
       try {
         const body = await resp.json();
         if (typeof body.detail === 'string') detail = body.detail;
-      } catch (_) { /* 忽略解析失败 */ }
+      } catch (_) { /* ignore parse failures */ }
       await minWait;
       lastError = { status: resp.status, detail };
       showErrorOverlay();
@@ -2588,7 +2624,7 @@ async function submit() {
       return;
     }
     lastResult = data;
-    // 新结果 = 新会话：清空追问记录与展开状态
+    // A new result means a new session: clear the chat log and the expanded state
     state.chat = freshChat();
     METRICS.forEach((m) => { state.openExplain[m] = false; });
     $('chat-input').value = '';
@@ -2605,7 +2641,7 @@ async function submit() {
   }
 }
 
-/* --------------------------------------------------------- 结果渲染 */
+/* --------------------------------------------------------- Result rendering */
 
 const GAUGE_R = 92;
 const GAUGE_C = 2 * Math.PI * GAUGE_R;
@@ -2619,7 +2655,8 @@ function animateGauge(arcEl, scoreEl, target, animate) {
   const finalOffset = GAUGE_C * (1 - clamped / 100);
   arcEl.style.strokeDasharray = String(GAUGE_C);
 
-  // 先落终值：即使动画帧不执行（后台标签页、节流环境），显示的也是正确结果
+  // Set the final value first: even if animation frames never run (background tab,
+  // throttled environment), what is displayed is still the correct result
   arcEl.style.strokeDashoffset = String(finalOffset);
   scoreEl.textContent = clamped.toFixed(1);
 
@@ -2628,14 +2665,15 @@ function animateGauge(arcEl, scoreEl, target, animate) {
     return;
   }
 
-  // 圆环用 CSS 过渡驱动（不依赖 rAF）：归零 → 强制重排 → 设终值
+  // The ring is driven by a CSS transition (no rAF dependency): zero it, force a
+  // reflow, then set the final value
   arcEl.style.transition = 'none';
   arcEl.style.strokeDashoffset = String(GAUGE_C);
   void arcEl.getBoundingClientRect();
   arcEl.style.transition = 'stroke-dashoffset 1.1s cubic-bezier(0.22, 1, 0.36, 1)';
   arcEl.style.strokeDashoffset = String(finalOffset);
 
-  // 数字计数用 rAF；若不执行，上面已落的终值保持不变
+  // The number counts up via rAF; if that never runs, the final value set above stands
   const duration = 1100;
   const start = performance.now();
   const ease = (p) => 1 - Math.pow(1 - p, 3);
@@ -2651,7 +2689,7 @@ function animateGauge(arcEl, scoreEl, target, animate) {
 function renderResult(data, { animate }) {
   const t = T();
 
-  // 两个环形仪表盘
+  // The two ring gauges
   const gauges = [
     { wrap: 'gauge-dengue', arc: 'arc-dengue', score: 'score-dengue', badge: 'badge-dengue', d: data.dengue },
     { wrap: 'gauge-severe', arc: 'arc-severe', score: 'score-severe', badge: 'badge-severe', d: data.severe },
@@ -2664,7 +2702,7 @@ function renderResult(data, { animate }) {
     animateGauge($(arc), $(score), d.score, animate);
   });
 
-  // 加重风险横条
+  // The worsening-risk bar
   const worse = data.worsening;
   const metric = $('metric-worsening');
   metric.classList.remove('level-low', 'level-medium', 'level-high');
@@ -2673,7 +2711,7 @@ function renderResult(data, { animate }) {
   $('badge-worsening').textContent = t.result.levels[worse.level];
   const fill = $('bar-worsening');
   if (animate && !prefersReducedMotion()) {
-    // 同样用「归零 → 强制重排 → 设终值」的 CSS 过渡，不依赖 rAF
+    // Same "zero, force reflow, set final value" CSS transition; no rAF dependency
     fill.style.transition = 'none';
     fill.style.width = '0%';
     void fill.getBoundingClientRect();
@@ -2681,7 +2719,7 @@ function renderResult(data, { animate }) {
   }
   fill.style.width = `${worse.score}%`;
 
-  // WHO 警示征象横幅（规则判断，独立于模型评分）
+  // WHO warning-sign banner (rule-based, independent of the model score)
   const banner = $('warning-banner');
   const signs = Array.isArray(data.warning_signs) ? data.warning_signs : [];
   if (signs.length) {
@@ -2693,7 +2731,7 @@ function renderResult(data, { animate }) {
     banner.hidden = true;
   }
 
-  // 文本
+  // Text
   $('result-summary').textContent = data.summary || '';
   $('model-note').textContent = data.model_note || '';
   $('epi-week-line').textContent = data.epi_week
@@ -2701,24 +2739,25 @@ function renderResult(data, { animate }) {
     : '';
   $('disclaimer-bar').textContent = data.disclaimer || t.disclaimer;
 
-  // 流行病学暴露背景（规则判断）
+  // Epidemiological exposure context (rule-based)
   renderExposure(data.exposure_context);
 
-  // 模型贡献项面板（可展开）
+  // Model contribution panels (expandable)
   renderAllExplanations(data.explanations);
 
-  // 旅行背景（来自目的地查询，未参与评分）
+  // Travel context (from the destination lookup; took no part in the scoring)
   renderTravelContext();
 
-  // 建议卡片：就医 → 监测 → 防护
+  // Advice cards: seek care -> monitoring -> protection
   fillAdviceCards($('advice-cards'), data.advice, animate);
 
-  // 追问对话
+  // Follow-up chat
   renderChatChips();
   renderChatLog();
 }
 
-/** 建议卡片（就医 → 监测 → 防护）；结果页与目的地页共用同一套卡片样式。 */
+/** Advice cards (seek care -> monitoring -> protection); the result page and the
+ *  destination page share one card style. */
 function fillAdviceCards(host, advice, animate) {
   const t = T();
   host.replaceChildren();
@@ -2749,7 +2788,7 @@ function fillAdviceCards(host, advice, animate) {
   return host.childElementCount > 0;
 }
 
-/* --------------------------------------------------------- 暴露背景 */
+/* --------------------------------------------------------- Exposure context */
 
 function renderExposure(ctx) {
   const t = T().result.exposure;
@@ -2775,11 +2814,12 @@ function renderExposure(ctx) {
   chip.hidden = false;
 }
 
-/* --------------------------------------------------------- 来源链接（目的地页与对话共用） */
+/* ------------------------------------- Source links (shared by destination and chat) */
 
 /**
- * 只接受 http(s) 链接。后端目前只会给正常网址，但渲染成可点击链接的东西
- * 必须自己把关，绝不让 javascript: 之类的 scheme 进到 href 里。
+ * Accept http(s) links only. The back end currently only ever produces ordinary URLs,
+ * but anything rendered as a clickable link has to be vetted here: a scheme such as
+ * javascript: must never reach an href.
  */
 function safeUrl(value) {
   const raw = String(value == null ? '' : value).trim();
@@ -2793,7 +2833,8 @@ function safeUrl(value) {
   }
 }
 
-/** 一条来源：有可用网址就渲染成新标签页打开的真链接，否则退化为纯文本。 */
+/** One source: rendered as a real link opening in a new tab when it has a usable URL,
+ *  and degrading to plain text otherwise. */
 function sourceItem(item) {
   const url = safeUrl(item.url);
   const title = String(item.title == null ? '' : item.title).trim() || url;
@@ -2817,9 +2858,11 @@ function sourceItem(item) {
     li.appendChild(span);
   }
 
-  // 检索结果里，卫生部门与新闻站是并排返回的。后端按域名判定过 authority，
-  // 这里把政府 / 国际卫生机构标出来，读者才分得清哪条更可核对。
-  // WHO 那一组本身就写着「世界卫生组织」，再挂一个「官方」是重复的。
+  // Search results return health authorities and news sites side by side. The back end
+  // has already judged authority by domain; marking the government / international health
+  // bodies here is what lets the reader tell which ones are more checkable.
+  // The WHO group already says "World Health Organization" on the label, so hanging an
+  // "official" badge on it as well would be redundant.
   if (item.authority === 'official' && item.origin !== 'who') {
     const badge = document.createElement('span');
     badge.className = 'src-official';
@@ -2838,8 +2881,8 @@ function sourceItem(item) {
 }
 
 /**
- * 来源区块：按 origin 分成「世卫官方」与「网络检索」两组。
- * sources 为空时返回 null —— 调用方不要渲染空标题。
+ * The sources block: split by origin into a "WHO official" group and a "web search" group.
+ * Returns null when sources is empty -- callers must not render an empty heading.
  */
 function buildSourcesBlock(sources, className) {
   const t = T();
@@ -2881,7 +2924,7 @@ function buildSourcesBlock(sources, className) {
   return rendered ? wrap : null;
 }
 
-/* --------------------------------------------------------- 目的地查询 */
+/* --------------------------------------------------------- Destination lookup */
 
 function destErrorMessage() {
   const t = T().dest.errors;
@@ -2945,7 +2988,7 @@ function renderDestChips() {
   }));
 }
 
-/** 一层信息卡片：图标 + 标题 + 可信度标签 + 正文 + 脚注。 */
+/** One information-layer card: icon + heading + trustworthiness label + body + footnote. */
 function buildLayerCard(variant, icon, title, tag, bodyNodes, caption) {
   const sec = document.createElement('section');
   sec.className = `dest-layer layer-${variant}`;
@@ -2984,7 +3027,8 @@ function destEmptyLine(text) {
   return p;
 }
 
-/** 第一层：地区背景（流行程度 + 季节性）。只有定性徽章，绝不出现数字。 */
+/** Layer one: regional background (endemicity + seasonality). Qualitative badges only;
+ *  a number must never appear here. */
 function buildReferenceLayer(data) {
   const t = T().dest;
   const matched = data.matched === true;
@@ -3023,7 +3067,8 @@ function buildReferenceLayer(data) {
   );
 }
 
-/** 第二层：世卫组织通报。每条都带真实日期——有些是数年前的，日期就是诚实本身。 */
+/** Layer two: WHO notices. Every one carries its real date -- some are years old, and
+ *  the date is the honesty. */
 function buildWhoLayer(data) {
   const t = T().dest;
   const notices = Array.isArray(data.who_notices)
@@ -3052,7 +3097,8 @@ function buildWhoLayer(data) {
         li.appendChild(d);
       }
 
-      // 链接本身就是这一行的弹性子项，触控面积才能撑满整行
+      // The link itself is the flex child of this row, so the touch target fills the
+      // whole line
       let titleEl;
       if (url) {
         titleEl = document.createElement('a');
@@ -3077,7 +3123,8 @@ function buildWhoLayer(data) {
   );
 }
 
-/** 第三层：模型联网检索的近期报道。可能为空；检索降级/关闭时如实说明。 */
+/** Layer three: recent reporting from the model's web search. May be empty; when search
+ *  is degraded or disabled, say so plainly. */
 function buildRecentLayer(data) {
   const t = T().dest;
   const findings = Array.isArray(data.recent_findings)
@@ -3136,13 +3183,13 @@ function renderDestResults() {
   title.textContent = fmt(t.dest.resultTitle, { location });
   host.appendChild(title);
 
-  // 这一页没有评分，而且是刻意的——先把这件事说清楚
+  // This page has no score, and that is deliberate -- say so up front
   const noScore = document.createElement('p');
   noScore.className = 'dest-noscore';
   noScore.textContent = t.dest.noScore;
   host.appendChild(noScore);
 
-  // 参考表里没有匹配到：直说，并且不猜流行程度
+  // No match in the reference table: say so, and do not guess the endemicity
   if (data.matched !== true) {
     const un = document.createElement('p');
     un.className = 'dest-unmatched';
@@ -3150,18 +3197,18 @@ function renderDestResults() {
     host.appendChild(un);
   }
 
-  // 三层信息，可信度从高到低，分块呈现
+  // The three layers, in descending order of trustworthiness, presented as blocks
   const reference = buildReferenceLayer(data);
   if (reference) host.appendChild(reference);
   host.appendChild(buildWhoLayer(data));
   host.appendChild(buildRecentLayer(data));
 
-  // 建议：就医 → 监测 → 防护
+  // Advice: seek care -> monitoring -> protection
   const grid = document.createElement('div');
   grid.className = 'advice-grid';
   if (fillAdviceCards(grid, data.advice, false)) host.appendChild(grid);
 
-  // 来源：世卫官方 / 网络检索，分组标注，全部新标签页打开
+  // Sources: WHO official / web search, labelled by group, all opening in a new tab
   const sources = buildSourcesBlock(data.sources, 'dest-sources');
   if (sources) host.appendChild(sources);
 
@@ -3174,7 +3221,8 @@ function renderDestResults() {
   }
 }
 
-/** 整个目的地视图的渲染入口；切换语言时原地重来，输入与结果都不丢。 */
+/** Render entry point for the whole destination view; on a language change it re-runs in
+ *  place, losing neither the input nor the results. */
 function renderDestination() {
   const t = T();
   const d = state.destination;
@@ -3199,11 +3247,11 @@ function renderDestination() {
 
   renderDestChips();
 
-  // 输入为空的提示：只有一句话，跟着当前语言重写
+  // The empty-input hint: a single sentence, rewritten to follow the current language
   if (d.hint) showDestHint(t.dest.emptyHint);
   else hideDestHint();
 
-  // 错误就地展示 + 重试，不走全局错误浮层
+  // Errors are shown in place with a retry; they do not go through the global error overlay
   const errBox = $('dest-error');
   if (d.error && !d.loading) {
     $('dest-error-text').textContent = destErrorMessage();
@@ -3278,7 +3326,7 @@ async function runDestination(location) {
       try {
         const body = await resp.json();
         if (typeof body.detail === 'string') detail = body.detail;
-      } catch (_) { /* 忽略解析失败 */ }
+      } catch (_) { /* ignore parse failures */ }
       await minWait;
       finish({ error: { status: resp.status, detail } });
       return;
@@ -3297,11 +3345,12 @@ async function runDestination(location) {
   }
 }
 
-/* --------------------------------------------------------- 结果页的旅行背景 */
+/* ------------------------------------------- Travel context on the result page */
 
 /**
- * 结果页顶部的旅行背景卡片：只有用户在本次会话里查过目的地才显示，
- * 并且必须写明它**没有参与上面的评分**（问卷里没有地点这一题）。
+ * The travel context card at the top of the result page: shown only if the user looked
+ * up a destination during this session, and it must state that it **took no part in the
+ * scores above** (the questionnaire has no location question).
  */
 function renderTravelContext() {
   const t = T();
@@ -3309,7 +3358,7 @@ function renderTravelContext() {
   const card = $('travel-context');
   const offer = $('travel-offer');
 
-  // 没查过目的地：只给一个小入口
+  // No destination looked up: offer only a small entry point
   if (!data) {
     card.hidden = true;
     $('travel-offer-text').textContent = t.travel.offer;
@@ -3329,7 +3378,7 @@ function renderTravelContext() {
     card.classList.add(`endem-${level}`);
     badge.textContent = fmt(t.travel.level, { level: t.dest.endemicity.levels[level] });
   } else {
-    // 参考表里没有这个地点：不猜等级
+    // This place is not in the reference table: do not guess a level
     card.classList.add('endem-unknown');
     badge.textContent = t.travel.notMatched;
   }
@@ -3346,9 +3395,9 @@ function renderTravelContext() {
   card.hidden = false;
 }
 
-/* --------------------------------------------------------- 「为什么是这个分数」 */
+/* --------------------------------------------------------- "Why this score" */
 
-// 指标 ↔ DOM 的映射：触发按钮、面板、指标名的 I18N 键
+// Metric <-> DOM mapping: the trigger button, the panel, and the I18N key of the metric name
 const EXPLAIN_TARGETS = {
   dengue: { trigger: 'gauge-dengue', panel: 'explain-dengue', name: 'dengue' },
   worsening: { trigger: 'btn-explain-worsening', panel: 'explain-worsening', name: 'worsening' },
@@ -3368,7 +3417,7 @@ function renderAllExplanations(all) {
     const trigger = $(target.trigger);
     const panel = $(target.panel);
 
-    // 没有贡献项就别假装可以点开
+    // With no contributions, do not pretend it can be opened
     if (!items.length) {
       state.openExplain[metric] = false;
       trigger.disabled = true;
@@ -3426,7 +3475,7 @@ function buildExplainPanel(metric, items) {
     bar.className = 'ex-bar';
     const fill = document.createElement('span');
     fill.className = `ex-fill dir-${dir}`;
-    // 宽度只表示同一列表内的相对大小，最小 6% 保证可见
+    // Width expresses relative size within this one list only; a 6% minimum keeps it visible
     const pct = max > 0 ? Math.max(6, Math.round((value / max) * 100)) : 6;
     fill.style.width = `${pct}%`;
     bar.appendChild(fill);
@@ -3472,7 +3521,7 @@ function toggleExplain(metric) {
   $(target.panel).hidden = !open;
 }
 
-/* --------------------------------------------------------- 错误 */
+/* --------------------------------------------------------- Errors */
 
 function errorMessage() {
   const t = T().errors;
@@ -3501,7 +3550,7 @@ function hideErrorOverlay() {
   lastError = null;
 }
 
-/* --------------------------------------------------------- 隐私说明浮层 */
+/* --------------------------------------------------------- Privacy overlay */
 
 function renderPrivacy() {
   const t = T().privacy;
@@ -3534,7 +3583,7 @@ function closePrivacy() {
   }
 }
 
-/* --------------------------------------------------------- 追问对话 */
+/* --------------------------------------------------------- Follow-up chat */
 
 function chatContext() {
   const a = state.answers;
@@ -3561,7 +3610,8 @@ function chatContext() {
   return ctx;
 }
 
-/** 回传最近若干轮；末尾那条正是本次提问，交给 question 字段，不重复放进 history。 */
+/** Send back the most recent few turns; the last of them is this very question, which
+ *  goes in the question field and is not duplicated into history. */
 function chatHistory() {
   const clean = state.chat.messages.filter((m) => !m.error && m.content);
   return clean
@@ -3600,7 +3650,8 @@ function chatBubble(msg) {
 
   el.append(who, document.createTextNode(msg.content));
 
-  // 回答里带的来源：按世卫官方 / 网络检索分组，新标签页打开；没有就什么都不渲染
+  // Sources carried by the answer: grouped into WHO official / web search, opening in a
+  // new tab; render nothing at all when there are none
   const sources = buildSourcesBlock(msg.sources, 'msg-sources');
   if (sources) el.appendChild(sources);
 
@@ -3663,7 +3714,8 @@ function updateChatCounter() {
 function autoGrowChatInput() {
   const el = $('chat-input');
   el.style.height = 'auto';
-  // 视图隐藏时 scrollHeight 为 0，此时清空内联高度，交回 CSS 的 min-height
+  // While the view is hidden scrollHeight is 0, so clear the inline height and hand
+  // control back to the CSS min-height
   const h = el.scrollHeight;
   el.style.height = h > 0 ? `${Math.min(h, 132)}px` : '';
 }
@@ -3723,7 +3775,7 @@ async function runChatTurn(question) {
     const sources = data && Array.isArray(data.sources) ? data.sources : [];
     state.chat.messages.push({ role: 'assistant', content: reply, sources });
   } catch (_) {
-    // 对话失败只在气泡里提示，不弹全局错误浮层
+    // A chat failure is reported in the bubble only; no global error overlay
     state.chat.messages.push({ role: 'assistant', error: true, question });
   } finally {
     setChatBusy(false);
@@ -3731,7 +3783,7 @@ async function runChatTurn(question) {
   }
 }
 
-/* --------------------------------------------------------- 初始化 */
+/* --------------------------------------------------------- Initialisation */
 
 function resetWizard() {
   state.answers = freshAnswers();
@@ -3759,7 +3811,7 @@ function init() {
     showView('wizard');
   });
 
-  // ---- 目的地查询（第二条路径）----
+  // ---- Destination lookup (the second path) ----
   $('btn-destination').addEventListener('click', () => openDestination('hero'));
   $('btn-dest-back').addEventListener('click', leaveDestination);
 
@@ -3778,16 +3830,18 @@ function init() {
     runDestination(d.location || d.query);
   });
 
-  // 目的地页 → 症状自评：两种意图，明确区分，不共用同一个流程
+  // Destination page -> symptom self-assessment: two distinct intents, kept explicitly
+  // separate rather than sharing one flow
   $('btn-dest-to-symptoms').addEventListener('click', () => {
     resetWizard();
     showView('wizard');
   });
 
-  // 结果页 → 目的地查询（还没查过时的小入口）
+  // Result page -> destination lookup (the small entry point shown before any lookup)
   $('btn-travel-offer').addEventListener('click', () => openDestination('result'));
 
-  // 问诊模式切换：智能问诊 / 完整问卷（答案共享，切回智能会重新规划）
+  // Interview mode switch: smart interview / full questionnaire (answers are shared, and
+  // switching back to smart re-plans)
   $('mode-adaptive').addEventListener('click', () => {
     if (state.mode !== 'adaptive') setMode('adaptive');
   });
@@ -3807,7 +3861,7 @@ function init() {
     else goStep(state.step + 1, 'forward');
   });
 
-  // 智能模式：键盘 1/2/3 快速作答当前问题
+  // Smart mode: keys 1/2/3 answer the current question quickly
   document.addEventListener('keydown', (e) => {
     if (e.key !== '1' && e.key !== '2' && e.key !== '3') return;
     if ($('view-wizard').hidden || state.mode !== 'adaptive') return;
@@ -3840,13 +3894,13 @@ function init() {
     showView('wizard');
   });
 
-  // 隐私说明浮层
+  // Privacy overlay
   $('btn-privacy').addEventListener('click', openPrivacy);
   $('btn-privacy-chat').addEventListener('click', openPrivacy);
   $('btn-privacy-close').addEventListener('click', closePrivacy);
   $('privacy-overlay').querySelector('.overlay-backdrop')
     .addEventListener('click', closePrivacy);
-  // 单控件对话框：Tab 不外逃，始终停在关闭按钮上
+  // Single-control dialog: Tab must not escape, and always lands on the close button
   $('privacy-overlay').addEventListener('keydown', (e) => {
     if (e.key === 'Tab') {
       e.preventDefault();
@@ -3854,19 +3908,19 @@ function init() {
     }
   });
 
-  // 「为什么是这个分数」——两个仪表盘 + 加重风险横条
+  // "Why this score" -- the two gauges plus the worsening-risk bar
   METRICS.forEach((metric) => {
     $(EXPLAIN_TARGETS[metric].trigger)
       .addEventListener('click', () => toggleExplain(metric));
   });
 
-  // 追问对话
+  // Follow-up chat
   const chatInput = $('chat-input');
   chatInput.addEventListener('input', () => {
     updateChatCounter();
     autoGrowChatInput();
   });
-  // Enter 送出、Shift+Enter 换行；输入法组字中的 Enter 不算送出
+  // Enter sends, Shift+Enter inserts a newline; an Enter during IME composition does not send
   chatInput.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
     e.preventDefault();
@@ -3877,7 +3931,7 @@ function init() {
     submitChatForm();
   });
 
-  // 语言切换器
+  // Language switcher
   const toggle = $('lang-toggle');
   const menu = $('lang-menu');
   toggle.addEventListener('click', (e) => {

@@ -1,24 +1,29 @@
-"""行前目的地查询（POST /api/destination）：某地最近三个月的登革热情况。
+"""Pre-travel destination lookup (POST /api/destination): dengue in a place, last three months.
 
-三层结构，可信度与成本都从上到下递减/递增：
+Three layers; trustworthiness falls and cost rises as you go down:
 
-  第 1 层  内置地区表 + WHO 疾病暴发新闻（app.intel）
-           —— 稳定、免费、离线也有一半能答，**永远先跑**。
-  第 2 层  联网检索（DeepSeek 的 Anthropic 端点 + web_search 服务端工具）
-           —— 只有它能回答「最近三个月怎么样」，但按次计费且可能一无所获。
-  第 3 层  出行前建议（deepseek_client.fallback_travel_advice）
-           —— 固定文案，不来自模型，因此永远可用、永远合规。
+  Layer 1  Built-in regional table + WHO Disease Outbreak News (app.intel)
+           -- stable, free, and half of it still answers offline, so it **always runs first**.
+  Layer 2  Web search (DeepSeek's Anthropic endpoint + the server-side web_search tool)
+           -- the only layer that can answer "how have the last three months been", but it
+           is billed per search and may come back with nothing at all.
+  Layer 3  Pre-travel advice (deepseek_client.fallback_travel_advice)
+           -- fixed copy, not model output, so it is always available and always compliant.
 
-**这个接口不产出任何评分。** 地点从来不参与打分，也不改变暴露档位。要在这里
-返回一个「目的地风险分」，就只能拿一张粗粒度国家表编一个数字出来。
+**This endpoint produces no score whatsoever.** Location never takes part in scoring, and it
+never changes the exposure band. Returning a "destination risk score" here would mean making
+up a number out of a coarse-grained country table.
 
-三条不变量：
-  1. recent_findings 非空 ⟺ search_status == "ok"。检索没跑、跑了没结果、
-     或者结果没通过出口校验，这一段一律清空——宁可少说，不可说不准的。
-  2. sources 里的每条链接都真的来自某个接口：WHO 通报（origin=who）或
-     检索结果（origin=search）。没有第三种来源，也没有「大概是这个链接」。
-  3. 同一个 (规范地名, 语言) 在 TTL 内只检索一次。缓存的只有成功的那次；
-     失败不缓存，否则一次网络抖动会被钉在缓存里 6 小时。
+Three invariants:
+  1. recent_findings non-empty ⟺ search_status == "ok". If the search did not run, ran and
+     found nothing, or its result failed the output check, this section is cleared -- better
+     to say less than to say something we cannot stand behind.
+  2. Every link in sources really does come from some endpoint: a WHO notice (origin=who) or
+     a search result (origin=search). There is no third kind of source, and no "this is
+     probably the link".
+  3. The same (canonical place name, language) is searched only once within the TTL. Only a
+     successful lookup is cached; failures are not, otherwise one network blip would stay
+     pinned in the cache for 6 hours.
 """
 
 import logging
@@ -44,39 +49,42 @@ from app.verifier import format_violations, verify_chat_reply
 
 logger = logging.getLogger(__name__)
 
-# recent_findings 最多几条（提示词要求 2-4 条，这里是兜底截断）
+# How many recent_findings at most (the prompt asks for 2-4; this is the fallback truncation)
 MAX_FINDINGS = 4
-# 单条要点的字符上限：超过就是模型没按格式走，整段当作不可用
+# Character cap for one finding: going over it means the model ignored the format,
+# so the whole section is treated as unusable
 MAX_FINDING_CHARS = 400
-# 要点行的项目符号
+# Bullet markers for finding lines
 _BULLET_PREFIXES = ("- ", "* ", "• ", "· ", "– ", "— ")
-# Markdown 的加粗/斜体记号（实测模型会无视「不要用 Markdown」这条要求）
+# Markdown bold/italic markers (in practice the model ignores the "no Markdown" instruction)
 _EMPHASIS_RE = re.compile(r"\*{1,3}|__")
 
-# 出口校验最多重问几次（不含首次）。重问会再花一次检索，所以只给一次，
-# 而且第二次把 max_uses 压到 1——重写措辞不需要再查一遍。
+# How many re-asks the output check gets at most (first attempt not counted). A re-ask costs
+# another search, so it only gets one, and the second attempt drops max_uses to 1 --
+# rewording does not need another lookup.
 _VERIFY_RETRIES = 1
 _RETRY_MAX_USES = 1
 
-# 地区表允许的流行程度取值（与 schemas.Endemicity 一致）
+# Endemicity values the regional table is allowed to return (matches schemas.Endemicity)
 _ENDEMICITY_VALUES: tuple[str, ...] = ("high", "moderate", "low", "none", "unknown")
 
 
-# ---------- 缓存：(规范地名, 语言) -> 完整响应 ----------
+# ---------- Cache: (canonical place name, language) -> full response ----------
 #
-# 缓存整份响应而不是只缓存检索结果：命中时连 WHO 接口都不用碰，
-# 一次请求真正做到零外部调用。时钟可注入，测试直接推时间。
+# The whole response is cached, not just the search result: on a hit not even the WHO
+# endpoint is touched, so one request really does make zero external calls. The clock is
+# injectable, so tests can simply push time forward.
 
 _CACHE: dict[tuple[str, str], tuple[float, dict]] = {}
 
 
 def clear_destination_cache() -> None:
-    """清空目的地缓存（测试用）。"""
+    """Clear the destination cache (for tests)."""
     _CACHE.clear()
 
 
 def destination_cache_state() -> dict:
-    """只读快照（测试与排障用）。"""
+    """Read-only snapshot (for tests and troubleshooting)."""
     return {"size": len(_CACHE), "keys": sorted(_CACHE)}
 
 
@@ -101,25 +109,28 @@ def _cache_put(key: tuple[str, str], payload: dict, now: float) -> None:
         _CACHE[key] = (now, payload)
 
 
-# ---------- 解析与组装 ----------
+# ---------- Parsing and assembly ----------
 
 
 def _strip_emphasis(text: str) -> str:
-    """去掉 Markdown 的加粗/斜体记号。
+    """Strip Markdown bold/italic markers.
 
-    提示词已经写了「不要用 Markdown」，实测模型照样会写
-    「- **病例数维持低位：** …」。前端渲染的是纯文本，星号会原样露出来，
-    与其和模型拉锯，不如在这里擦掉——只擦记号，不动一个字的内容。
+    The prompt already says "no Markdown", and in practice the model writes
+    "- **Case counts stay low:** ..." anyway. The front end renders plain text, so the
+    asterisks show up verbatim; rather than keep fighting the model, wipe them here --
+    only the markers, not one character of the content.
     """
     return _EMPHASIS_RE.sub("", text or "").strip()
 
 
 def parse_findings(reply: str) -> list[str]:
-    """把模型的散文回复拆成要点列表。
+    """Split the model's prose reply into a list of findings.
 
-    先找「- 」开头的行——提示词要的就是这个格式。一条都没有时退回「每个非空行
-    算一条」，但**丢掉纯链接行**（来源由 sources 单独列出，不该混进要点里）。
-    超长条目直接丢弃：那说明模型没按格式走，与其塞一段没人读的文字，不如少一条。
+    First look for lines beginning with "- " -- that is the format the prompt asks for.
+    When there is not a single one, fall back to "every non-blank line is one finding",
+    but **drop bare link lines** (sources are listed separately under sources and should
+    not be mixed into the findings). Over-long items are simply discarded: they mean the
+    model ignored the format, and one finding fewer beats a block of text nobody reads.
     """
     lines = [line.strip() for line in (reply or "").splitlines()]
     bullets: list[str] = []
@@ -144,11 +155,13 @@ def parse_findings(reply: str) -> list[str]:
 
 
 def is_plausible_place(raw: str) -> bool:
-    """地区表没认出来的输入，还值不值得为它花一次检索。
+    """Whether an input the regional table did not recognise still merits one search.
 
-    放行的是「表里没有的真地名」（城市、州、地区），拦下的是明显不是地名的东西：
-    太长、带链接、或者一看就是一整句话。宁可偶尔多查一次，也不要因为一个
-    未收录的城市名就退化成「查不到」——但也不能让整段提示注入变成检索关键词。
+    What gets through is "a real place name the table does not list" (cities, states,
+    regions); what gets stopped is anything plainly not a place name: too long, carrying a
+    link, or obviously a whole sentence. Better to pay for the odd extra search than to
+    degrade to "not found" over one city missing from the table -- but equally, a whole
+    prompt injection must not become the search query.
     """
     text = (raw or "").strip()
     if not (2 <= len(text) <= 60):
@@ -159,7 +172,7 @@ def is_plausible_place(raw: str) -> bool:
     return len(text.split()) <= 6
 
 
-# ---------- 主流程 ----------
+# ---------- Main flow ----------
 
 
 async def _search_once(
@@ -170,7 +183,7 @@ async def _search_once(
     location: str,
     max_uses: int,
 ) -> dict:
-    """发一次检索调用，返回 {"reply", "sources", "search_count"}。失败向上抛。"""
+    """Issue one search call: {"reply", "sources", "search_count"}. Failures propagate."""
     return await client.chat_anthropic_search(
         system,
         [{"role": "user", "content": user}],
@@ -187,7 +200,7 @@ async def run_destination(
     now: float | None = None,
     client: DeepSeekClient | None = None,
 ) -> DestinationResponse:
-    """行前查询主流程。now 可注入（测试用来推缓存时间）。"""
+    """Main pre-travel lookup flow. now is injectable (tests use it to advance cache time)."""
     settings = get_settings()
     t0 = time.perf_counter()
     clock = time.time() if now is None else now
@@ -200,13 +213,13 @@ async def run_destination(
         logger.info("目的地查询命中缓存：%s / %s（未发起任何外部调用）", canonical, language)
         return DestinationResponse.model_validate(cached)
 
-    # ---- 第 1 层：地区表 + WHO 通报（免费且稳定，永远先跑）----
+    # ---- Layer 1: regional table + WHO notices (free and stable, always runs first) ----
     intel_result = lookup_dengue_context(req.location, now=clock)
     display_location = str(intel_result.get("location") or canonical or req.location)
     endemicity = str(intel_result.get("endemicity") or "unknown")
     who_notices = list(intel_result.get("who_notices") or [])
 
-    # ---- 第 2 层：联网检索（只有它能回答「最近三个月」）----
+    # ---- Layer 2: web search (the only layer that can answer "the last three months") ----
     findings: list[str] = []
     search_sources: list[dict] = []
     search_count = 0
@@ -216,7 +229,8 @@ async def run_destination(
         matched or is_plausible_place(req.location)
     )
     if settings.search_enabled and not should_search:
-        # 开关是开的，只是这个输入不值得花钱查——对外与「查了没查到」同义
+        # The switch is on, this input just is not worth paying to search -- to the
+        # outside world the same thing as "searched and found nothing"
         status = "degraded"
         logger.info("目的地查询：%r 不像地名，跳过检索", req.location[:60])
 
@@ -264,15 +278,17 @@ async def run_destination(
                 attempt + 1,
                 "；".join(v.code for v in violations),
             )
-            # 重问时不需要再查一遍——事实已经在上一轮的检索结果里
+            # A re-ask does not need another lookup -- the facts are already in
+            # the previous round's search results
             prompt = user + "\n\n" + format_violations(violations, as_json=False)
             max_uses = _RETRY_MAX_USES
 
-    # 不变量：只有 ok 才带要点。degraded/disabled 一律清空，不端不确定的文本。
+    # Invariant: only "ok" carries findings. degraded/disabled are always cleared;
+    # we do not serve text we are unsure of.
     if status != "ok":
         findings = []
 
-    if endemicity not in _ENDEMICITY_VALUES:  # 地区表被人改坏时也不要 500
+    if endemicity not in _ENDEMICITY_VALUES:  # do not 500 if someone breaks the table
         logger.warning("地区表给出了未知的流行程度取值：%r", endemicity)
         endemicity = "unknown"
 

@@ -1,4 +1,4 @@
-"""FastAPI 入口：API 路由 + 静态页面托管。"""
+"""FastAPI entry point: API routes + static page hosting."""
 
 import logging
 from pathlib import Path
@@ -32,25 +32,29 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    title="登革热风险评估服务",
+    title="Dengue risk assessment service",
     description=(
-        "基于问卷 + DeepSeek + 登革热逻辑回归模型（巴西 SINAN 2023–2025）"
-        "的风险自评后端。评分为相对风险参考值，非感染概率。"
+        "A risk self-assessment back end built on a questionnaire + DeepSeek + dengue "
+        "logistic regression models (Brazilian SINAN 2023–2025). Scores are relative "
+        "risk indicators, not infection probabilities."
     ),
 )
 
 
-# 注意：API 路由必须先注册，静态目录最后挂载到 "/"，否则会遮住 API。
+# Note: the API routes must be registered first and the static directory mounted on "/" last,
+# otherwise it would shadow the API.
 
 
 @app.post("/api/assess", response_model=AssessmentResult)
 async def assess(form: FormInput) -> AssessmentResult:
-    """接收问卷，返回风险评估结果。
+    """Take the questionnaire, return the risk assessment result.
 
-    注意：**上游 LLM 失败不再让这个接口失败**。评分、警示征象、暴露背景、
-    贡献拆解全都在本地算出，建议文本失败时由 pipeline 退回模板并把
-    advice_source 标成 "template"（详见 pipeline 模块说明）。因此下面的 502
-    分支现在是纯防御——真的走到这里，说明流水线里出现了没被兜住的新失败点。
+    Note: **an upstream LLM failure no longer fails this endpoint**. The scores, the warning
+    signs, the exposure context and the contribution breakdown are all computed locally; if
+    the advice text fails, the pipeline falls back to the template and marks advice_source
+    as "template" (see the pipeline module docstring). The 502 branch below is therefore
+    purely defensive now -- actually reaching it means a new, uncaught failure point has
+    appeared in the pipeline.
     """
     try:
         return await run_assessment(form)
@@ -72,10 +76,11 @@ async def assess(form: FormInput) -> AssessmentResult:
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest) -> ChatResponse:
-    """就用户自己的评估结果做追问。无状态：上下文与历史由前端回传。
+    """Follow-up questions about the user's own assessment result.
 
-    错误提示按请求语言本地化——聊天窗口里冒出一句中文报错，对西语用户
-    比没有回复更让人困惑。
+    Stateless: the context and history are sent back by the front end. Error messages are
+    localised to the request language -- a Chinese error popping up in the chat window is
+    more confusing to a Spanish-speaking user than no reply at all.
     """
     try:
         return await run_chat(req)
@@ -95,13 +100,17 @@ async def chat(req: ChatRequest) -> ChatResponse:
 
 @app.post("/api/destination", response_model=DestinationResponse)
 async def destination(req: DestinationRequest) -> DestinationResponse:
-    """行前查询：某地最近三个月的登革热情况（地区表 + WHO 通报 + 联网检索）。
+    """Pre-travel lookup: dengue in a place over the last three months.
 
-    **这个接口不返回任何评分**：地点是行前参考，从来不参与打分。
+    (Regional table + WHO notices + web search.)
 
-    上游检索失败不会让它失败——地区表与 WHO 通报是本地/公开数据，照常返回，
-    只是 search_status 降级为 degraded（详见 app.destination 模块说明）。
-    因此这里的 502 分支是纯防御。
+    **This endpoint returns no score at all**: the location is pre-travel background and
+    never takes part in scoring.
+
+    An upstream search failure does not fail it -- the regional table and the WHO notices
+    are local/public data and are returned as usual, with search_status merely degraded
+    (see the app.destination module docstring). The 502 branch here is therefore purely
+    defensive.
     """
     try:
         return await run_destination(req)
@@ -123,9 +132,10 @@ async def destination(req: DestinationRequest) -> DestinationResponse:
 
 @app.post("/api/plan", response_model=PlanResponse)
 async def plan_questions(req: PlanRequest) -> PlanResponse:
-    """自适应问诊规划：分数硬边界、能否证明性地停止、接下来最值得问的问题。
+    """Adaptive questioning plan: hard score bounds, whether we can provably stop, what to ask next.
 
-    完全确定性的计算（只用模型系数），不调用任何 LLM，无副作用。
+    A fully deterministic computation (model coefficients only), with no LLM call and no
+    side effects.
     """
     try:
         return plan(req)
@@ -139,7 +149,7 @@ async def plan_questions(req: PlanRequest) -> PlanResponse:
 
 @app.get("/api/health")
 async def health() -> dict:
-    """健康检查：同时确认三个模型已加载。"""
+    """Health check: also confirms that all three models are loaded."""
     from app.ml_model import get_model
 
     return {
@@ -149,8 +159,9 @@ async def health() -> dict:
     }
 
 
-# ---- 静态页面：static/ 目录由前端 agent 维护 ----
-# check_dir=False：目录暂不存在时不在 import 阶段崩溃（目录可在启动后再创建）
+# ---- Static pages: the static/ directory is maintained by the front-end agent ----
+# check_dir=False: do not crash at import time when the directory does not exist yet
+# (it may be created after start-up)
 _static_dir = Path(__file__).resolve().parent.parent / "static"
 try:
     if not _static_dir.is_dir():
