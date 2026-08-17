@@ -75,17 +75,23 @@ def test_shipped_scenarios_all_pass(tmp_path, capsys):
 
 
 def test_shipped_scenarios_file_is_valid_and_broad():
-    """场景文件本身合法，且覆盖面达到基线：两类端点、约 15-25 个场景。"""
+    """场景文件本身合法，且覆盖面达到基线：三类端点、约 20-35 个场景。"""
     scenarios = load_scenarios(DEFAULT_SCENARIOS)
-    assert 15 <= len(scenarios) <= 25
+    assert 20 <= len(scenarios) <= 35
     endpoints = {s.get("endpoint", "assess") for s in scenarios}
-    assert endpoints == {"assess", "chat"}
+    assert endpoints == {"assess", "chat", "destination"}
     # 五种语言都必须被 assess 场景覆盖
     languages = {s["request"].get("language") for s in scenarios if s.get("endpoint") == "assess"}
     assert {"zh-CN", "zh-TW", "en", "es", "pt"} <= languages
-    # 两个新的输出保证也必须被固化：来源白名单与 advice_source
+    # 输出保证必须被固化：来源白名单、来源出处标签、检索花销、advice_source
     check_types = {c["type"] for s in scenarios for c in s["checks"]}
-    assert {"sources_urls_allowed", "advice_source"} <= check_types
+    assert {
+        "sources_urls_allowed",
+        "sources_origins",
+        "search_count",
+        "no_model_scores",
+        "advice_source",
+    } <= check_types
 
 
 # ---------- 故意失败：失败案例库的产生路径 ----------

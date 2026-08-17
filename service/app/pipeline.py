@@ -11,7 +11,9 @@ DeepSeek 的第一次调用只做一件补充工作：从用户的自由文本�
 两者都不进入 26 维特征向量，也不参与打分，只与评分并列呈现。
 
 本模块另外承载 /api/chat 的追问对话（run_chat）——无状态，上下文由前端回传，
-并给模型挂上一个可自主调用的工具（app.intel.lookup_dengue_context）。
+并**按问题里有没有地点分成两条路**：没有地点就给模型挂上一个可自主调用的工具
+（app.intel.lookup_dengue_context），有地点则改走联网检索（见 _run_chat_with_search）。
+行前目的地查询 /api/destination 在 app.destination 里，两者共用同一套来源与校验规则。
 
 **生成之后还有一道闸门**：所有 LLM 文本在返回前都要过 app.verifier 的规则校验
 （剂量、感染概率、就医紧迫性、语言一致性、结构、编造链接）。不通过就带着违规
@@ -30,12 +32,13 @@ import time
 
 from app.config import get_settings
 from app.deepseek_client import DeepSeekClient, DeepSeekError, fallback_advice
-from app.eval_log import log_assessment
-from app.intel import INTEL_TOOL_NAME, lookup_dengue_context
+from app.eval_log import log_assessment, log_search
+from app.intel import INTEL_TOOL_NAME, find_location, lookup_dengue_context
 from app.ml_model import encode_features, get_epi_week, get_model
 from app.prompt_builder import (
     build_advice_prompt,
     build_chat_prompt,
+    build_chat_search_prompt,
     build_chat_tools,
     build_feature_prompt,
 )
@@ -54,6 +57,8 @@ from app.schemas import (
     ExposureContext,
     FormInput,
     Source,
+    merge_sources,
+    select_search_sources,
 )
 from app.verifier import (
     Violation,
@@ -360,12 +365,97 @@ def _sources_from(tool_results: list[dict]) -> list[Source]:
     return sources
 
 
+async def _run_chat_with_search(
+    req: ChatRequest, location: str, t0: float
+) -> ChatResponse:
+    """追问对话的**检索版**：问题里出现了地点，就联网查最近三个月的情况。
+
+    与函数工具那条路的差别不只是「多了检索」：这里**不给模型任何函数工具**。
+    地区背景（endemicity / 季节 / WHO 通报）由我们自己查好摆进提示词——
+    那次查询是本地表 + 一个 12 小时缓存的公开接口，几乎不花钱，却能给检索
+    一个可核对的地基，也顺带把 WHO 的链接加进本轮的引用白名单。
+
+    白名单因此是**两层的并集**：WHO 工具返回的链接 + 检索真正返回的链接。
+    回复里出现任何第三种链接，仍然是 fabricated_url，仍然重问一次再兜底。
+    """
+    settings = get_settings()
+    intel_result = lookup_dengue_context(location)
+    who_notices = list(intel_result.get("who_notices") or [])
+
+    system, user = build_chat_search_prompt(req, intel_result)
+    client = DeepSeekClient()
+    messages: list[dict] = [{"role": "user", "content": user}]
+    max_uses = settings.search_max_uses
+    search_count = 0
+    reply = ""
+    search_sources: list[dict] = []
+    violations: list[Violation] = []
+
+    for attempt in range(1 + _CHAT_VERIFY_RETRIES):
+        outcome = await client.chat_anthropic_search(
+            system,
+            messages,
+            language=req.language,
+            max_uses=max_uses,
+            purpose="chat",
+            mock_location=location,
+        )
+        reply = (outcome.get("reply") or "").strip()
+        search_count += int(outcome.get("search_count") or 0)
+        search_sources += [s for s in (outcome.get("sources") or []) if isinstance(s, dict)]
+        sources = merge_sources(
+            who_notices, select_search_sources(search_sources, reply)
+        )
+
+        violations = verify_chat_reply(reply, req.language, [s.url for s in sources])
+        if not violations:
+            logger.info(
+                "追问对话（检索版）完成，耗时 %.2fs（language=%s, location=%s，"
+                "检索 %d 次，来源 %d 条）",
+                time.perf_counter() - t0,
+                req.language,
+                location,
+                search_count,
+                len(sources),
+            )
+            log_search("chat", req.language, location, search_count, "ok", matched=True)
+            return ChatResponse(reply=reply, sources=sources, search_count=search_count)
+
+        _log_violations(f"追问回复（检索版）第 {attempt + 1} 次", violations)
+        messages = [
+            {"role": "user", "content": user},
+            {"role": "assistant", "content": reply},
+            {"role": "user", "content": format_violations(violations, as_json=False)},
+        ]
+        # 重写措辞不需要再检索一遍：事实已经在上一轮的结果里
+        max_uses = 0
+
+    logger.warning(
+        "追问回复（检索版）两次均未通过输出校验（%s），返回兜底文案",
+        "；".join(v.code for v in violations),
+    )
+    log_search("chat", req.language, location, search_count, "degraded", matched=True)
+    return ChatResponse(
+        reply=_UNRELIABLE_REPLY[req.language], sources=[], search_count=search_count
+    )
+
+
 async def run_chat(req: ChatRequest) -> ChatResponse:
     """追问对话：无状态，上下文与历史全部由前端回传。
 
-    模型可以自主调用 lookup_dengue_context 查某地的登革热背景；回复在返回前
-    要过 verify_chat_reply，其中 allowed_urls **只包含这一轮工具真正返回过的**
-    链接。校验不过就带违规说明重问一次，还不过就换成本地化的兜底句。
+    **两条路，由「问题里有没有地点」决定**（见 _run_chat_with_search）：
+
+      有地点 + SEARCH_ENABLED —— 走联网检索，回答里能带最近三个月的情况；
+      其余情况               —— 走原来的 OpenAI 函数调用路径，**一分钱检索费都不花**。
+
+    这条分流是有意的成本控制。检索按次计费且次数由模型决定（实测一个普通问题
+    触发了 4 次检索、约 13.9k 输入 token），而「我的分数是什么意思」这类问题
+    根本不需要联网。地点识别用的是本地别名表（app.intel.find_location），
+    零成本、支持中西葡三语写法。
+
+    两条路的出口是同一道闸门：回复在返回前都要过 verify_chat_reply，
+    allowed_urls **只包含这一轮真正取回过的**链接。校验不过就带违规说明重问一次，
+    还不过就换成本地化的兜底句。
 
     失败（DeepSeekError）向上抛出，由路由转成 502——聊天没有别的东西可退。
     """
@@ -377,14 +467,21 @@ async def run_chat(req: ChatRequest) -> ChatResponse:
             if block is not None
         ]
     )
+    # 地点识别只看用户原文（本轮问题 + 最近几条历史）——不能把整个提示词丢进去，
+    # 里面的语言名（「葡萄牙语」「西班牙语」）会被当成地名命中。
+    probe = "\n".join([*(m.content for m in req.history), req.question])
+    location = find_location(probe)
+    settings = get_settings()
+    if location and settings.search_enabled:
+        return await _run_chat_with_search(req, location, t0)
+    if location:
+        logger.info("识别到地点 %s，但 SEARCH_ENABLED=false，走无检索路径", location)
+
     system, user = build_chat_prompt(req)
     client = DeepSeekClient()
     collected: list[dict] = []
     executor = _make_tool_executor(collected)
     tools = build_chat_tools()
-    # MOCK 模式判断该不该模拟工具调用时只看这段原文——不能把整个提示词丢进去，
-    # 里面的语言名（「葡萄牙语」「西班牙语」）会被当成地名命中。
-    probe = "\n".join([*(m.content for m in req.history), req.question])
 
     messages: list[dict] = [{"role": "user", "content": user}]
     reply = ""

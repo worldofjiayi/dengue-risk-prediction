@@ -1,8 +1,9 @@
 """场景化评测运行器（eval harness）：回归门禁 + 失败案例库。
 
 对 service/eval/scenarios.json 里的每个场景，用 FastAPI TestClient 在**进程内**
-调用 /api/assess 或 /api/chat（强制 MOCK_MODE=true，不发任何真实网络请求），
-逐条执行声明式检查（check），最后汇总通过/失败。
+调用 /api/assess、/api/chat 或 /api/destination（强制 MOCK_MODE=true，
+不发任何真实网络请求，也**不会产生任何检索费用**），逐条执行声明式检查（check），
+最后汇总通过/失败。
 
 用法（Windows，项目根目录）：
     .venv\\Scripts\\python.exe service\\scripts\\eval_run.py
@@ -29,7 +30,17 @@ SERVICE_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SCENARIOS = SERVICE_ROOT / "eval" / "scenarios.json"
 DEFAULT_FAILURES_DIR = SERVICE_ROOT / "eval" / "failures"
 
-ENDPOINTS = {"assess": "/api/assess", "chat": "/api/chat"}
+ENDPOINTS = {
+    "assess": "/api/assess",
+    "chat": "/api/chat",
+    "destination": "/api/destination",
+}
+
+# 一条来源允许出现的 origin 标签（与 schemas.SourceOrigin 一致，刻意不 import）
+SOURCE_ORIGINS = ("who", "search")
+
+# /api/destination 绝不能出现的字段：地点不参与打分，这里没有任何评分
+FORBIDDEN_SCORE_FIELDS = ("dengue", "worsening", "severe", "epi_week", "advice_source")
 
 # 响应里三个模型的字段名（与 AssessmentResult 一致）
 MODEL_FIELDS = ("dengue", "worsening", "severe")
@@ -115,7 +126,7 @@ def build_client():
     if str(SERVICE_ROOT) not in sys.path:
         sys.path.insert(0, str(SERVICE_ROOT))
 
-    # 压掉 app / httpx 的 INFO 日志：18 个场景的流水线日志会把结果行淹掉
+    # 压掉 app / httpx 的 INFO 日志：几十个场景的流水线日志会把结果行淹掉
     for name in ("app", "httpx"):
         logging.getLogger(name).setLevel(logging.WARNING)
 
@@ -344,11 +355,30 @@ def _check_reply_mentions_tier(check, scenario, status, body, runner):
     )
 
 
-def _check_sources_urls_allowed(check, scenario, status, body, runner):
-    """回复里的每个链接都必须出现在本轮 sources 中（可选地约束 sources 条数）。
+def _citable_text(body: dict) -> str:
+    """会被扫描链接的所有字段：追问回复、目的地要点、目的地建议。
 
-    这是「不许编造引用」在端到端层面的门禁：sources 是工具真正返回过的东西，
-    回复只能引用它们。min_sources / max_sources 用来分别固化「问了地点就该有
+    /api/chat 只有 reply；/api/destination 的「模型写的那部分」是 recent_findings，
+    建议虽然是固定文案，也一起扫——固化的不变量是「响应里出现的链接必须来自
+    sources」，而不是「reply 里的链接必须来自 sources」。
+    """
+    parts = [str(body.get("reply") or "")]
+    findings = body.get("recent_findings")
+    if isinstance(findings, list):
+        parts += [str(f) for f in findings]
+    advice = body.get("advice")
+    if isinstance(advice, dict):
+        for items in advice.values():
+            if isinstance(items, list):
+                parts += [str(i) for i in items]
+    return "\n".join(parts)
+
+
+def _check_sources_urls_allowed(check, scenario, status, body, runner):
+    """响应里的每个链接都必须出现在本轮 sources 中（可选地约束 sources 条数）。
+
+    这是「不许编造引用」在端到端层面的门禁：sources 是接口真正返回过的东西，
+    生成的文字只能引用它们。min_sources / max_sources 用来分别固化「问了地点就该有
     来源」和「没问地点就不该有来源」两种场景。
     """
     if not isinstance(body, dict):
@@ -364,14 +394,56 @@ def _check_sources_urls_allowed(check, scenario, status, body, runner):
     if maximum is not None and len(sources) > maximum:
         return False, f"expected at most {maximum} source(s), got {len(sources)}: {allowed}"
 
-    reply = body.get("reply")
-    cited = [u.rstrip(URL_TRAILING) for u in URL_RE.findall(str(reply or ""))]
+    cited = [u.rstrip(URL_TRAILING) for u in URL_RE.findall(_citable_text(body))]
     unlisted = [u for u in cited if u not in allowed]
     if unlisted:
-        return False, f"reply cites URL(s) absent from sources: {unlisted}; sources={allowed}"
+        return False, f"response cites URL(s) absent from sources: {unlisted}; sources={allowed}"
     return True, (
         f"{len(cited)} cited URL(s) all present in {len(sources)} source(s): {allowed}"
     )
+
+
+def _check_sources_origins(check, scenario, status, body, runner):
+    """每条来源都必须标明出处，且期望的出处都出现了。
+
+    provenance 是这个功能的全部意义：WHO 通报与网络检索的时效性和可信度不同，
+    前端要能分别标注。一条没有 origin 的来源，用户就无从判断它有多硬。
+    """
+    if not isinstance(body, dict) or not isinstance(body.get("sources"), list):
+        return False, f"response has no sources list (HTTP {status})"
+    sources = body["sources"]
+    got = [s.get("origin") for s in sources if isinstance(s, dict)]
+    bad = [o for o in got if o not in SOURCE_ORIGINS]
+    if bad:
+        return False, f"sources carry unknown origin label(s): {bad}; expected one of {list(SOURCE_ORIGINS)}"
+    expected = check.get("expect_origins") or []
+    missing = [o for o in expected if o not in got]
+    if missing:
+        return False, f"expected origin(s) {missing} among sources, got {got}"
+    return True, f"{len(got)} source(s) labelled: {got}"
+
+
+def _check_search_count(check, scenario, status, body, runner):
+    """本轮真的检索了几次。0 用来固化「没有地点就一分钱都不花」这条规则。"""
+    expect = check.get("expect")
+    got = body.get("search_count") if isinstance(body, dict) else None
+    maximum = check.get("max")
+    if expect is not None:
+        return got == expect, f"search_count expected {expect}, got {got!r}"
+    if maximum is not None:
+        ok = isinstance(got, int) and got <= maximum
+        return ok, f"search_count expected <= {maximum}, got {got!r}"
+    return False, "search_count check needs 'expect' or 'max'"
+
+
+def _check_no_model_scores(check, scenario, status, body, runner):
+    """目的地查询绝不能带评分：地点从来不参与打分，编一个「目的地风险分」是撒谎。"""
+    if not isinstance(body, dict):
+        return False, f"response body is not an object (HTTP {status})"
+    present = [f for f in FORBIDDEN_SCORE_FIELDS if f in body]
+    if present:
+        return False, f"destination response must carry no scores, but has: {present}"
+    return True, f"no scoring fields present (checked {list(FORBIDDEN_SCORE_FIELDS)})"
 
 
 def _check_advice_source(check, scenario, status, body, runner):
@@ -423,6 +495,9 @@ CHECKS = {
     "reply_nonempty": _check_reply_nonempty,
     "reply_mentions_tier": _check_reply_mentions_tier,
     "sources_urls_allowed": _check_sources_urls_allowed,
+    "sources_origins": _check_sources_origins,
+    "search_count": _check_search_count,
+    "no_model_scores": _check_no_model_scores,
     "advice_source": _check_advice_source,
     "scores_match_scenario": _check_scores_match_scenario,
 }

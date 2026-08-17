@@ -83,6 +83,15 @@ Language = Literal["zh-CN", "zh-TW", "en", "es", "pt"]
 ModelKey = Literal["A", "B", "B2"]
 # 建议文本的来源：真实模型输出（已通过输出校验）还是内置模板兜底
 AdviceSource = Literal["llm", "template"]
+# 一条引用来源出自哪一层：WHO 疾病暴发新闻接口，还是模型的联网检索
+SourceOrigin = Literal["who", "search"]
+# 联网检索这一轮的状态：
+#   ok       —— 检索跑了，并且带回了来源
+#   degraded —— 检索被尝试过，但失败 / 一无所获 / 输出没通过校验（其余各层照常返回）
+#   disabled —— SEARCH_ENABLED=false，压根没打算检索
+SearchStatus = Literal["ok", "degraded", "disabled"]
+# 地区流行程度（与 app/data/dengue_endemicity.json 的取值一致）
+Endemicity = Literal["high", "moderate", "low", "none", "unknown"]
 
 # ---------- 五语言固定文案 ----------
 
@@ -420,24 +429,194 @@ class ChatRequest(BaseModel):
 
 
 class Source(BaseModel):
-    """一条可引用的来源（目前只有 WHO 疾病暴发新闻）。"""
+    """一条可引用的来源。
 
-    title: str = Field(..., description="通报标题，原样取自 WHO 接口")
-    date: str = Field(..., description="发布日期 YYYY-MM-DD")
-    url: str = Field(..., description="who.int 上的通报页面")
+    origin 说明这条链接是**哪一层**给的：
+        who    —— app.intel 从 WHO 疾病暴发新闻接口取回的通报（稳定、免费、总是可用）
+        search —— 模型这一轮联网检索真正返回的页面（按次计费，可能一无所获）
+    两层的可信度与时效性不同，前端要能分别标注，所以标签必须跟着链接一起走，
+    而不是靠 URL 前缀去猜。
+
+    date 允许为空：WHO 通报一定有发布日期，检索结果经常没有。
+    """
+
+    title: str = Field(..., description="页面标题，原样取自接口/检索结果")
+    date: str | None = Field(default=None, description="发布日期，取不到时为 null")
+    url: str = Field(..., description="来源页面地址")
+    origin: SourceOrigin = Field(default="who", description="这条来源来自哪一层")
 
 
 class ChatResponse(BaseModel):
     """POST /api/chat 响应体。
 
-    sources 是**本轮工具调用真正返回过的**来源。它同时是给用户看的引用列表，
-    和校验器判断「回复里的链接是不是编的」所依据的白名单——回复中出现任何
-    不在这个列表里的链接，这一轮就会被判失败并退回兜底文案。
-    没调用工具（或工具没查到）时它就是空列表，回复里也不该有任何链接。
+    sources 是**这一轮真正取回过的**来源：WHO 工具结果 + 联网检索结果的并集。
+    它同时是给用户看的引用列表，和校验器判断「回复里的链接是不是编的」所依据的
+    白名单——回复中出现任何不在这个列表里的链接，这一轮就会被判失败并退回兜底文案。
+    没查任何东西（或什么都没查到）时它就是空列表，回复里也不该有任何链接。
     """
 
     reply: str
     sources: list[Source] = Field(default_factory=list)
+    search_count: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "这一轮真的联网检索了几次。没有识别到地点、或 SEARCH_ENABLED=false 时恒为 0——"
+            "检索按次计费，花没花钱不该只有服务端日志知道。"
+        ),
+    )
+
+
+# ---------- 目的地查询（POST /api/destination） ----------
+
+DESTINATION_LOCATION_MAX = 120
+
+
+class WhoNotice(BaseModel):
+    """一条 WHO 疾病暴发新闻通报（形状与 intel.lookup_dengue_context 一致）。"""
+
+    title: str
+    date: str
+    url: str
+
+
+class DestinationAdvice(BaseModel):
+    """出行前的三类建议。
+
+    字段顺序**刻意与 Advice 不同**：这里没有病人、也没有评分，用户是在出发前问
+    「那边现在什么情况」。最该先说的是怎么不被叮，其次才是「什么情况下去看医生」
+    与旅途中该盯着什么。Pydantic 按声明顺序序列化，这个顺序就是前端展示顺序。
+    """
+
+    protection: list[str]
+    medical: list[str]
+    monitoring: list[str]
+
+
+class DestinationRequest(BaseModel):
+    """POST /api/destination 请求体。"""
+
+    location: str = Field(
+        ...,
+        min_length=1,
+        max_length=DESTINATION_LOCATION_MAX,
+        description="国家 / 地区 / 城市名，任意语言",
+    )
+    language: Language = Field(default="zh-CN", description="输出语言（BCP 47）")
+
+    @field_validator("location")
+    @classmethod
+    def _location_not_blank(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("location 不能为空白")
+        return text
+
+
+class DestinationResponse(BaseModel):
+    """POST /api/destination 响应体。
+
+    **这里没有任何评分**，一个也没有。地点从来不参与打分，也不改变暴露档位；
+    它是行前参考，与三个模型输出属于两件事。硬要在这里返回一个「目的地风险分」，
+    就是凭一张粗粒度国家表编出一个数字。
+
+    三层结构，可信度从高到低：
+      1. endemicity / season_note / who_notices —— 本地表 + WHO 接口，稳定且免费；
+      2. recent_findings —— 模型联网检索得到的「最近三个月」要点，按次计费，可能没有；
+      3. advice —— 与档位对应的固定文案，永远可用。
+    第 2 层没拿到时降级到 1+3，绝不用「常识」把它填满。
+    """
+
+    location: str = Field(..., description="规范英文名；没认出来就是原样输入")
+    matched: bool = Field(..., description="是否在内置地区表里认出了这个地名")
+    endemicity: Endemicity
+    season_note: str | None = Field(default=None, description="季节/地域说明；未命中为 null")
+    who_notices: list[WhoNotice] = Field(default_factory=list)
+    recent_findings: list[str] = Field(
+        default_factory=list,
+        description="最近约三个月的事实要点；检索失败或未通过校验时为空列表",
+    )
+    sources: list[Source] = Field(
+        default_factory=list,
+        description="WHO 通报（origin=who）与检索结果（origin=search）的合并去重清单",
+    )
+    advice: DestinationAdvice
+    search_status: SearchStatus
+    disclaimer: str = DISCLAIMER
+    model_note: str = MODEL_NOTES["zh-CN"]
+
+
+# 一次请求最多向用户展示几条检索来源。
+# 实测：两轮检索带回了 2 × 10 = 20 条结果，其中大半是新闻聚合站与不相关页面。
+# 20 条链接不是引用列表，是噪音。
+MAX_SEARCH_SOURCES = 8
+
+
+def select_search_sources(
+    sources: list[dict] | None, reply: str, limit: int = MAX_SEARCH_SOURCES
+) -> list[dict]:
+    """从检索返回的一大堆结果里挑出要展示（也就是要进白名单）的那些。
+
+    **回复里真的引用过的链接一条都不能丢**：sources 同时是引用列表和校验器的
+    白名单，把模型真正引用的那条截掉，就会被自己的校验器判成「编造链接」，
+    好答案反而被退回兜底文案。所以先收全被引用的，再按原顺序补足到 limit。
+    """
+    items = [s for s in (sources or []) if isinstance(s, dict) and s.get("url")]
+    text = reply or ""
+    cited = [s for s in items if str(s["url"]) in text]
+    chosen = list(cited)
+    seen = {str(s["url"]) for s in cited}
+    for item in items:
+        if len(chosen) >= max(limit, len(cited)):
+            break
+        url = str(item["url"])
+        if url not in seen:
+            seen.add(url)
+            chosen.append(item)
+    return chosen
+
+
+def merge_sources(
+    who_notices: list[dict] | None, search_sources: list[dict] | None
+) -> list[Source]:
+    """把两层来源合成一个带 origin 标签的列表：WHO 通报在前，检索结果在后。
+
+    放在 schemas 里而不是某个流水线模块里，是因为 /api/chat 与 /api/destination
+    都要用它，而「一条来源长什么样、来自哪一层」本来就是数据契约的一部分。
+
+    按 url 去重、保留顺序；WHO 在前是因为它更稳定也更容易核对。
+    date 取不到就是 None（检索结果经常没有 page_age），绝不用今天的日期顶上。
+    """
+    merged: list[Source] = []
+    seen: set[str] = set()
+    for notice in who_notices or []:
+        url = str(notice.get("url") or "")
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        merged.append(
+            Source(
+                title=str(notice.get("title") or url),
+                date=str(notice.get("date") or "") or None,
+                url=url,
+                origin="who",
+            )
+        )
+    for item in search_sources or []:
+        url = str(item.get("url") or "")
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        date = item.get("date")
+        merged.append(
+            Source(
+                title=str(item.get("title") or url),
+                date=str(date) if date else None,
+                url=url,
+                origin="search",
+            )
+        )
+    return merged
 
 
 def _drop_unknown_keys(value: dict, codes: tuple[str, ...]) -> dict:

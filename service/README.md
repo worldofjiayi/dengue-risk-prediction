@@ -30,13 +30,21 @@ flowchart LR
     T --> B
     X --> B
     B -->|AssessmentResult| G["Dual gauges + banners + advice"]
-    G -->|POST /api/chat| H["Follow-up Q&A<br>tools enabled"]
-    H <-->|tool_calls| I["lookup_dengue_context<br>app.intel"]
+    G -->|POST /api/chat| H{"Place named in the question?<br>app.intel.find_location"}
+    H -->|no| H1["OpenAI /chat/completions<br>function tool, no search"]
+    H -->|yes| H2["Anthropic /v1/messages<br>server-side web_search"]
+    H1 <-->|tool_calls| I["lookup_dengue_context<br>app.intel"]
+    H2 --> I
+    G -->|POST /api/destination| D2["Pre-travel lookup<br>app.destination<br>cached 6h per place × language"]
+    D2 --> I
+    D2 --> H2
     I --> J[("dengue_endemicity.json<br>WHO + CDC, 2026")]
     I --> K["WHO Disease Outbreak News<br>live, cached 12h"]
-    H --> W{{"Output verifier<br>allowed URLs = this turn's sources"}}
+    H2 --> S[("Search results<br>origin: search")]
+    H1 --> W{{"Output verifier<br>allowed URLs = WHO ∪ search results"}}
+    H2 --> W
     W -->|clean| G
-    W -.->|twice failed| Y["Localised fallback reply"]
+    W -.->|twice failed| Y["Localised fallback reply<br>/ empty recent_findings"]
 ```
 
 Feature encoding is **deterministic and authoritative**. The first LLM call has one narrow job:
@@ -48,11 +56,13 @@ Two things run **beside** the model rather than inside it — the WHO warning-si
 epidemiological exposure tier. Both are plain rules over the questionnaire, and both are described
 below.
 
-Two more layers wrap the LLM calls themselves: a rule-based
+Three more layers wrap the LLM calls themselves: a rule-based
 [output verifier](#output-verification) that every generated string must pass before it reaches a
-user, and an [epidemic-intelligence tool](#epidemic-intelligence) the chat model can call on its
-own initiative.
+user, an [epidemic-intelligence tool](#epidemic-intelligence) the chat model can call on its
+own initiative, and [web search](#web-search) — reached over a *different* API protocol, and only
+when the user actually named a place.
 
+- Endpoints: `POST /api/assess`, `POST /api/chat`, `POST /api/destination`, `POST /api/plan`
 - Entry point: `app.main:app` — port `80` in production, `8000` for local development
 - Static frontend served directly by FastAPI (`GET /` returns `static/index.html`)
 - Health: `GET /api/health` → `{"status":"ok","mock_mode":bool,"models":["A","B","B2"]}`
@@ -305,7 +315,7 @@ this service is not allowed to cross, and each of those lines is expressible as 
 | `urgency_missing` | `overall_tier == "high"` or any warning sign present, yet no `medical` item matches the language's seek-care lexicon | Low tier with no warning signs — advice may legitimately give a threshold instead |
 | `language_mismatch` | zh-CN/zh-TW below 30% CJK characters; en/es/pt above 5% CJK **or** carrying fewer than two of the language's function words | Loanwords and place names — the thresholds are deliberately loose |
 | `structure` | Any of `medical` / `monitoring` / `protection` outside 1–5 non-blank items, or an item over 400 characters | — |
-| `fabricated_url` | *(chat only)* A link that does not prefix-match one returned by this turn's tools | A reply with no links at all |
+| `fabricated_url` | *(chat / destination)* A link that does not prefix-match one returned by this turn's **tools or web search** | A reply with no links at all |
 | `empty` | *(chat only)* A blank reply | — |
 
 Each violation carries a developer-facing `message` written in the second person, because that
@@ -387,7 +397,8 @@ The chat model can call one tool, on its own initiative:
   `https://www.who.int/emergencies/disease-outbreak-news/item/{UrlName}`; nothing is hand-assembled.
 
 **The no-fabricated-URL invariant.** This is the load-bearing part. `ChatResponse.sources` holds
-exactly what this turn's tool calls returned, and those URLs are the *only* ones the reply may
+exactly what this turn retrieved — WHO tool results plus, on the search path,
+[what the web search returned](#web-search) — and those URLs are the *only* ones the reply may
 contain: `verify_chat_reply(reply, language, allowed_urls=<this turn's source URLs>)`. An empty
 `allowed_urls` means no tool returned anything, so **any** link is a violation. Fail twice and the
 turn is replaced with the localised fallback and empty `sources`. The tool description tells the
@@ -426,6 +437,106 @@ tool round by **actually invoking the injected executor** and citing a URL that 
 from it. That matters: the mock exercises the no-fabricated-URL invariant rather than side-stepping
 it. Only the user's own text is scanned for place names — not the rendered prompt, which contains
 language names like "葡萄牙语" that would otherwise be read as Portugal.
+
+---
+
+## Web search
+
+The endemicity table is a travel almanac and the WHO Disease Outbreak News feed is a slow
+publication channel. Neither can answer *"what has been happening there for the last three
+months?"* — so `/api/chat` and `/api/destination` can run a real web search, with real citations.
+
+### Two protocols in one client
+
+DeepSeek's web search is a **server-side tool** and it exists only on the **Anthropic-compatible**
+endpoint. The OpenAI-compatible endpoint this service already used does not offer it; sending the
+tool there just gets an ordinary function-call request back. So `deepseek_client.py` now speaks two
+protocols:
+
+| | Endpoint | Used by | Search |
+|---|---|---|---|
+| `chat_json` | `POST /chat/completions` (OpenAI) | notes extraction, advice generation | never |
+| `chat_with_tools` | `POST /chat/completions` (OpenAI) | `/api/chat` with **no place** named | never |
+| `chat_anthropic_search` | `POST /anthropic/v1/messages` (Anthropic) | `/api/chat` **with** a place, `/api/destination` | yes |
+
+The Anthropic path differs in every layer: `x-api-key` + `anthropic-version: 2023-06-01` instead of
+a bearer token, `system` as a top-level parameter instead of a message, and a reply that arrives as
+a list of content blocks — `thinking`, `text`, `server_tool_use`, `web_search_tool_result`. The
+parser concatenates the `text` blocks, **ignores `thinking` entirely**, and harvests every `url`
+(with its sibling `title` and `page_age`) out of the `web_search_tool_result` blocks, de-duplicated,
+order preserved. `usage.server_tool_use.web_search_requests` reports what was actually spent. On
+`stop_reason: "max_tokens"` the answer is still returned but a warning is logged — a truncated
+answer beats a 502, as long as the log says which one you got.
+
+Advice generation stays on the OpenAI path with no search: it summarises a score the service
+already computed, and there is nothing on the web that would improve it.
+
+### Search is bought only when a place is named
+
+Measured against the live API, one ordinary question triggered **4 searches and ~13.9k input
+tokens** (a second probe: 2 searches, 16.5k input tokens). Search is the only per-call, per-use
+cost in this service and the *number* of uses is the model's decision, not ours. So the gate is
+not a prompt instruction, it is control flow:
+
+`/api/chat` runs `intel.find_location(question + recent history)` first — a local alias table,
+zero cost, matching English, zh-CN, zh-TW, Spanish and Portuguese spellings. **No hit, no search
+tool, not even attached.** "What does the worsening score mean?" costs exactly what it cost before.
+A hit switches the turn to the Anthropic path, where the intel lookup is *also* performed and
+pasted into the prompt as known facts — the free layer grounds the paid one, and its WHO URLs join
+the citation whitelist.
+
+Three settings, all in `.env`:
+
+| Setting | Default | Effect |
+|---|---|---|
+| `SEARCH_ENABLED` | `true` | Master switch. Off → chat falls back to the function-tool path; `/api/destination` still answers from the WHO layer with `search_status: "disabled"` |
+| `SEARCH_MAX_USES` | `2` | Passed to the tool as `max_uses`. `0` means the tool is not attached at all — that is how a verification retry re-writes prose without buying a second search |
+| `SEARCH_CACHE_TTL_SECONDS` | `21600` (6 h) | Destination lookups are cached by `(canonical location, language)`. A second request for the same country makes **no external call at all** — not even the WHO one, since the whole response is cached. Only successful lookups are cached; a failure must not be pinned for six hours |
+
+Every request that *could* have searched writes one line to the evaluation log with its
+`search_count` — including the ones that ended up spending nothing. Counting only the requests that
+cost money makes it impossible to compute what fraction of traffic is free, which is the number
+that says whether the gate is working. `scripts/eval_stats.py` reports the total, the mean, the
+maximum and the zero-search share, broken down by `chat` / `destination`.
+
+### Provenance, and the extended no-fabricated-URL invariant
+
+Every citation now carries an `origin`:
+
+```json
+{ "title": "Dengue - Global situation", "date": "2024-05-30",
+  "url": "https://www.who.int/emergencies/disease-outbreak-news/item/2024-DON518",
+  "origin": "who" }
+```
+
+`who` means the WHO Disease Outbreak News API returned it; `search` means the web-search tool did.
+They are not equally hard, and a reader has to be able to tell them apart, so the label travels
+with the link rather than being guessed from the domain. `date` is nullable because search results
+usually arrive without a `page_age` — the field is left `null` rather than filled with today.
+
+The invariant from [Epidemic intelligence](#epidemic-intelligence) is unchanged in spirit and wider
+in scope: **allowed URLs = the union of this turn's WHO tool results and this turn's search
+results.** Anything else in the generated text is a `fabricated_url` violation → one re-ask with
+the violation message → still failing means the localised fallback reply (chat) or empty
+`recent_findings` with `search_status: "degraded"` (destination). Unverified text is never shipped.
+
+Two practical consequences of live testing:
+
+- A search round returns about **10 results**, so a two-round request arrives with 18–20 URLs. The
+  service caps what it exposes at 8 — but the selection puts every URL the reply actually cites
+  first, because `sources` is simultaneously the citation list *and* the verifier's allow-list.
+  Truncating a genuinely cited link would make the service reject its own correct answer.
+- That raw result list contains whatever the search engine ranked highly — national news sites and
+  aggregators alongside the health authority. Asking for official sources in the prompt shapes the
+  *findings* (a live run attributed every figure to Singapore's NEA) but not the *result list*.
+  This is exactly why the `origin` label exists rather than a claim that every source is official:
+  the reader can see that a link is a search hit and weigh it accordingly.
+
+**Mock mode never searches.** It returns a canned reply plus three real, stable public-health pages
+(a WHO DON item, the PAHO dengue topic page, the ECDC dengue overview) with one deliberately
+date-less entry, driven by the detected location — same code path, same shapes, same verification,
+no network and no spend. A canned demo that cited invented URLs would make the "no fabricated
+sources" invariant a lie in exactly the environment where people look at it most.
 
 ---
 
@@ -522,8 +633,14 @@ frontend replays the context and recent history on every turn.
   "sources": [
     { "title": "Dengue - Global situation",
       "date": "2024-05-30",
-      "url": "https://www.who.int/emergencies/disease-outbreak-news/item/2024-DON518" }
-  ]
+      "url": "https://www.who.int/emergencies/disease-outbreak-news/item/2024-DON518",
+      "origin": "who" },
+    { "title": "Dengue Cases - National Environment Agency",
+      "date": null,
+      "url": "https://www.nea.gov.sg/dengue-zika/dengue/dengue-cases",
+      "origin": "search" }
+  ],
+  "search_count": 2
 }
 ```
 
@@ -536,17 +653,85 @@ frontend replays the context and recent history on every turn.
   prescriptions and drug dosages, forbids stating any probability of infection, requires
   recommending a clinician when the user reports worsening or warning signs, redirects off-topic
   questions, and marks the user's text as data so embedded instructions are not followed.
-- `sources` is what this turn's tool calls actually returned and is therefore citable — `[]` when
-  no tool ran or nothing was found, in which case the reply must contain no links at all. It is
-  both the citation list and the verifier's allow-list. See
-  [Epidemic intelligence](#epidemic-intelligence).
+- `sources` is what this turn actually retrieved and is therefore citable — `[]` when nothing ran
+  or nothing was found, in which case the reply must contain no links at all. It is both the
+  citation list and the verifier's allow-list. Each entry carries `origin` (`who` | `search`) and
+  a nullable `date`. See [Epidemic intelligence](#epidemic-intelligence) and
+  [Web search](#web-search).
+- `search_count` is how many web searches this turn bought. **It is `0` whenever the question named
+  no place** (the search tool is not even attached) or `SEARCH_ENABLED=false`. Both fields are
+  additive — a client that ignores them behaves exactly as before.
 - Replies are plain prose. `DeepSeekClient.chat_with_tools` omits `response_format`, unlike
   `chat_json` which the two assessment calls still use.
-- In mock mode a question naming a known place runs the tool and cites what came back; otherwise
-  the reply is canned per language and quotes the user's own risk tier. Either way, no network call.
+- In mock mode a question naming a known place runs both layers and cites what came back;
+  otherwise the reply is canned per language and quotes the user's own risk tier. Either way, no
+  network call and no spend.
 - Errors: `DeepSeekError` → 502, unexpected → 500, both with a `detail` localised to `language`.
   A reply that fails verification twice returns **200** with the localised fallback text and empty
   `sources` — the model failed, not the request.
+
+### `POST /api/destination`
+
+A pre-travel lookup: what is the dengue situation in a place, over the **last three months**.
+
+```json
+{ "location": "Singapore", "language": "en" }
+```
+
+`location` is 1–120 characters in any language; blank returns 422. It is resolved through the same
+alias table as chat, so `新加坡`, `Singapur` and `Singapore` are one cache entry.
+
+```json
+{
+  "location": "Singapore",
+  "matched": true,
+  "endemicity": "high",
+  "season_note": "Year-round; warmer months of June to October usually see the highest counts.",
+  "who_notices": [
+    { "title": "Dengue - Global situation", "date": "2024-05-30",
+      "url": "https://www.who.int/emergencies/disease-outbreak-news/item/2024-DON518" }
+  ],
+  "recent_findings": ["Weekly case counts have been falling since June 2026."],
+  "sources": [
+    { "title": "Dengue - Global situation", "date": "2024-05-30",
+      "url": "https://www.who.int/emergencies/disease-outbreak-news/item/2024-DON518",
+      "origin": "who" },
+    { "title": "Dengue Cases - National Environment Agency", "date": null,
+      "url": "https://www.nea.gov.sg/dengue-zika/dengue/dengue-cases", "origin": "search" }
+  ],
+  "advice": { "protection": ["..."], "medical": ["..."], "monitoring": ["..."] },
+  "search_status": "ok",
+  "disclaimer": "...",
+  "model_note": "..."
+}
+```
+
+**There are no scores here, and there will not be.** A location has never fed the model and never
+changes the exposure tier; a "destination risk score" derived from a coarse country table would be
+a number invented to look quantitative. An eval check (`no_model_scores`) fails the build if
+`dengue`, `worsening`, `severe`, `epi_week` or `advice_source` ever appear in this response.
+
+Three layers, degrading independently:
+
+1. `endemicity`, `season_note`, `who_notices` — the local table and the WHO feed. Free, stable,
+   and the reason this endpoint still answers when everything else is down.
+2. `recent_findings` — 2–4 short factual bullets from the web search, with dates, preferring
+   government and public-health sources. **Non-empty if and only if `search_status == "ok"`.**
+3. `advice` — fixed per-language travel guidance, keyed only by whether the place is endemic.
+   It never comes from a model, so it is always available and always compliant. Its key order is
+   deliberately `protection → medical → monitoring`, unlike `/api/assess`: nobody here is ill yet,
+   so "how not to get bitten" comes before "when to see a doctor".
+
+`search_status`:
+
+- `ok` — the search ran and returned sources; `recent_findings` passed verification
+- `degraded` — search was attempted and failed, returned nothing, was skipped because the input
+  does not read like a place name, or produced text that failed verification twice. Layers 1 and 3
+  are returned as usual and `recent_findings` is `[]`
+- `disabled` — `SEARCH_ENABLED=false`
+
+An upstream failure returns **200**, not 502, for the same reason `/api/assess` does: the layers
+that are still valid are worth more than a clean error.
 
 ### `POST /api/plan`
 
@@ -580,14 +765,22 @@ cp .env.example .env        # defaults to MOCK_MODE=true
 Open <http://localhost:8000>.
 
 **In mock mode the risk scores are real** — computed by the actual model from your answers, and so
-are the exposure tier and the contribution breakdown. Only the natural-language advice and chat
-replies are canned (localised per language, and varied by risk tier), and `advice_source` says so.
-The output verifier and the epidemic-intelligence tool both run for real, the latter against its
-canned WHO list rather than the network. No API key required.
+are the exposure tier and the contribution breakdown. Only the natural-language advice, chat
+replies and search findings are canned (localised per language, and varied by risk tier), and
+`advice_source` / `search_status` say so. The output verifier and the epidemic-intelligence tool
+both run for real, the latter against its canned WHO list rather than the network. **No API key
+required, and no web search is ever bought.**
 
 ```bash
-pytest tests                    # 331 tests
-python scripts/eval_run.py      # 21 scenarios
+pytest tests                    # 386 tests (+1 live test, skipped unless RUN_LIVE_TESTS=1)
+python scripts/eval_run.py      # 26 scenarios
+```
+
+The one live test calls DeepSeek for real and therefore costs money; it is skipped by default so
+CI never spends anything:
+
+```bash
+RUN_LIVE_TESTS=1 pytest tests/test_search.py -k live   # one real search, needs DEEPSEEK_API_KEY
 ```
 
 ---
@@ -597,22 +790,35 @@ python scripts/eval_run.py      # 21 scenarios
 ```ini
 DEEPSEEK_API_KEY=sk-...
 DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_MODEL=deepseek-chat
+DEEPSEEK_MODEL=deepseek-v4-flash        # or deepseek-v4-pro
 MOCK_MODE=false
+
+# Web search — per-use billing, read the Web search section first
+SEARCH_ENABLED=true
+SEARCH_MAX_USES=2
+SEARCH_CACHE_TTL_SECONDS=21600
 ```
 
 The client speaks the OpenAI-compatible `/chat/completions` format, so any compatible provider
 works by changing `DEEPSEEK_BASE_URL` and `DEEPSEEK_MODEL`. The two assessment calls request
 `response_format: json_object` and feed parse failures back to the model for up to two retries;
-`/api/chat` uses the same endpoint without `response_format`, since a chat reply should be prose,
-and adds `tools` / `tool_choice: auto` for the epidemic-intelligence function. A provider that
-ignores `tools` degrades gracefully: no tool call, no sources, and the verifier then forbids links
-outright. Restart the service after editing `.env` (`sudo systemctl restart jiayi`).
+a place-free `/api/chat` turn uses the same endpoint without `response_format`, since a chat reply
+should be prose, and adds `tools` / `tool_choice: auto` for the epidemic-intelligence function. A
+provider that ignores `tools` degrades gracefully: no tool call, no sources, and the verifier then
+forbids links outright.
+
+Search is the one thing that is **not** portable: it uses the Anthropic-compatible
+`<BASE_URL>/anthropic/v1/messages` endpoint and the `web_search_20250305` server-side tool. A
+provider without that endpoint should run with `SEARCH_ENABLED=false` — chat then keeps the
+function-tool path and `/api/destination` reports `search_status: "disabled"` while still serving
+the endemicity table and WHO notices. Restart the service after editing `.env`
+(`sudo systemctl restart jiayi`).
 
 Going live also switches on the retry-then-fallback path: watch the logs for
 `未通过输出校验` (a violation was caught) and `建议退回模板文案` (both attempts failed). A steady
 stream of either means the prompt and the verifier disagree about something, and the prompt is
-usually the one to fix.
+usually the one to fix. For search, watch `检索完成` (how many searches a turn actually bought)
+and `检索回复被 max_tokens 截断` (the output budget is too small for the results that came back).
 
 ---
 
@@ -638,7 +844,8 @@ same time.
 
 ## Evaluation logging
 
-Each assessment appends one **de-identified** JSON line to `data/assessments.jsonl`:
+Each assessment appends one **de-identified** JSON line to `data/assessments.jsonl`, and each
+request that *could* have searched appends one line of its own:
 
 ```json
 {"timestamp": "2026-08-16T02:10:10+00:00", "language": "zh-CN", "mock_mode": true,
@@ -648,10 +855,20 @@ Each assessment appends one **de-identified** JSON line to `data/assessments.jso
  "exposure": {"FEVER_CLUSTER": "no", "CONFIRMED_CASE": "yes", "OUTBREAK_TRAVEL": "unknown"},
  "exposure_level": "high",
  "has_notes": true}
+{"timestamp": "2026-08-16T02:11:04+00:00", "kind": "destination", "language": "en",
+ "mock_mode": false, "location": "Singapore", "matched": true,
+ "search_count": 2, "search_status": "ok"}
 ```
 
-- **Free-text notes are never written to disk** — only a `has_notes` boolean. Records contain
-  numeric features, scores, and language.
+- The two record kinds are told apart by **fields, not order**: an assessment record has `scores`,
+  a search record has `search_count`. Anything with neither is counted as a bad line.
+- **Neither the free-text notes nor the chat question is ever written to disk** — only a
+  `has_notes` boolean, and for search records the resolved place name, which is a country label
+  with no identifying content.
+- Search records are written for every chat turn and destination lookup that *could* have
+  searched, including the ones where `search_count` is 0. Logging only the paid ones would make it
+  impossible to measure what share of traffic the place-name gate keeps free.
+- Records contain numeric features, scores, and language.
 - `exposure` and `exposure_level` are recorded in their own block, never inside `features` —
   they are categorical answers with no identifying content, and they are exactly the covariates
   worth testing during recalibration ("does knowing about a nearby confirmed case add
@@ -662,7 +879,8 @@ Each assessment appends one **de-identified** JSON line to `data/assessments.jso
 
 ```bash
 python scripts/eval_stats.py            # per-model distributions, level shares,
-                                        # exposure-tier distribution, languages
+                                        # exposure-tier distribution, languages,
+                                        # and search spend (total / mean / max / zero share)
 python scripts/eval_stats.py --json     # machine-readable
 ```
 
@@ -759,26 +977,27 @@ sudo certbot --nginx -d example.com
 ```
 service/
 ├── app/
-│   ├── main.py             FastAPI entry point, routes (/api/assess, /api/chat, /api/plan), static mounting
-│   ├── schemas.py          FormInput / MLFeatures / AssessmentResult / Chat* / Plan*, FEATS, localised strings
+│   ├── main.py             FastAPI entry point, routes (/api/assess, /api/chat, /api/destination, /api/plan), static mounting
+│   ├── schemas.py          FormInput / MLFeatures / AssessmentResult / Chat* / Destination* / Plan*, FEATS, localised strings, source merging
 │   ├── ml_model.py         coefficient loading, feature encoding, scoring, contribution breakdown
 │   ├── planner.py          adaptive questioning: score bounds, provable stop rule, next-question ranking
-│   ├── pipeline.py         orchestration: encode → rules → score → advise → verify → assemble; chat
-│   ├── prompt_builder.py   the LLM prompts (features, advice, chat) + the tool schema
-│   ├── deepseek_client.py  OpenAI-compatible client: JSON, plain-text and tool-calling loop; shared fallback text
+│   ├── pipeline.py         orchestration: encode → rules → score → advise → verify → assemble; chat (both paths)
+│   ├── destination.py      pre-travel lookup: WHO layer + web search + travel advice, cached per place × language
+│   ├── prompt_builder.py   the LLM prompts (features, advice, chat, search) + the tool schema
+│   ├── deepseek_client.py  two-protocol client: OpenAI JSON / tool-calling loop + Anthropic web search; shared fallback text
 │   ├── verifier.py         rule engine over generated text: dosage / probability / urgency / language / structure / URLs
 │   ├── intel.py            lookup_dengue_context: endemicity table + live WHO outbreak news, 12h cache
-│   ├── eval_log.py         de-identified evaluation logging
+│   ├── eval_log.py         de-identified evaluation logging (assessments + search spend)
 │   ├── config.py           .env settings
 │   ├── data/
 │   │   └── dengue_endemicity.json  81 countries/territories + alias map (WHO + CDC, 2026)
 │   └── model/
 │       └── dengue_models.json    fitted coefficients (mirror of ../model/results/)
 ├── static/                 hand-written frontend, zero external dependencies
-├── tests/                  331 pytest tests
-├── eval/scenarios.json     21 declarative regression scenarios
+├── tests/                  386 pytest tests (+1 live search test, skipped by default)
+├── eval/scenarios.json     26 declarative regression scenarios
 ├── scripts/eval_run.py     scenario runner (regression gate + failure library)
-├── scripts/eval_stats.py   evaluation log statistics
+├── scripts/eval_stats.py   evaluation log statistics, including search spend
 ├── deploy/                 systemd unit + manual launch script
 ├── .env.example
 └── requirements.txt

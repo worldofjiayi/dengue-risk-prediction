@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
 from app.deepseek_client import DeepSeekError
+from app.destination import run_destination
 from app.pipeline import run_assessment, run_chat
 from app.planner import plan
 from app.schemas import (
@@ -16,6 +17,8 @@ from app.schemas import (
     AssessmentResult,
     ChatRequest,
     ChatResponse,
+    DestinationRequest,
+    DestinationResponse,
     FormInput,
     PlanRequest,
     PlanResponse,
@@ -87,6 +90,34 @@ async def chat(req: ChatRequest) -> ChatResponse:
         logger.exception("追问对话发生未知错误")
         raise HTTPException(
             status_code=500, detail=SERVER_ERRORS.get(req.language, SERVER_ERRORS["zh-CN"])
+        ) from exc
+
+
+@app.post("/api/destination", response_model=DestinationResponse)
+async def destination(req: DestinationRequest) -> DestinationResponse:
+    """行前查询：某地最近三个月的登革热情况（地区表 + WHO 通报 + 联网检索）。
+
+    **这个接口不返回任何评分**：地点是行前参考，从来不参与打分。
+
+    上游检索失败不会让它失败——地区表与 WHO 通报是本地/公开数据，照常返回，
+    只是 search_status 降级为 degraded（详见 app.destination 模块说明）。
+    因此这里的 502 分支是纯防御。
+    """
+    try:
+        return await run_destination(req)
+    except DeepSeekError as exc:
+        logger.error("目的地查询上游错误（未兜住）：%s", exc)
+        raise HTTPException(
+            status_code=502,
+            detail=UPSTREAM_ERRORS.get(req.language, UPSTREAM_ERRORS["zh-CN"]),
+        ) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("目的地查询发生未知错误")
+        raise HTTPException(
+            status_code=500,
+            detail=SERVER_ERRORS.get(req.language, SERVER_ERRORS["zh-CN"]),
         ) from exc
 
 

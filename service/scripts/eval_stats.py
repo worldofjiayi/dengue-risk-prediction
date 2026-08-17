@@ -1,5 +1,9 @@
-"""评测数据统计：读取评估回流 JSONL，输出三个模型各自的评分分布与等级占比，
-以及流行病学暴露等级的分布（规则判断，与模型评分相互独立）。
+"""评测数据统计：读取评估回流 JSONL，输出三个模型各自的评分分布与等级占比、
+流行病学暴露等级的分布（规则判断，与模型评分相互独立），以及**联网检索的花销**。
+
+回流文件里有两种记录（见 app/eval_log.py）：带 scores 的评估记录，
+带 search_count 的检索记录。两者分开统计——检索记录没有评分，评估记录不检索，
+把它们混进同一个分母只会得到没有意义的数字。
 
 用法（Windows）：
     .venv\\Scripts\\python.exe scripts\\eval_stats.py                # 默认 data/assessments.jsonl
@@ -34,10 +38,21 @@ MODEL_FIELDS = {
 }
 
 
+def is_assessment(record: dict) -> bool:
+    """评估记录：带 scores 对象。"""
+    return isinstance(record.get("scores"), dict)
+
+
+def is_search(record: dict) -> bool:
+    """检索记录：带整数 search_count（bool 是 int 的子类，要挡掉）。"""
+    count = record.get("search_count")
+    return isinstance(count, int) and not isinstance(count, bool)
+
+
 def load_records(path: Path) -> tuple[list[dict], int]:
     """读取 JSONL，返回 (合法记录列表, 跳过的坏行数)。
 
-    坏行 = 非法 JSON、非对象、或缺少 scores 字段。
+    坏行 = 非法 JSON、非对象、或两种记录都不像（既没有 scores 也没有 search_count）。
     """
     records: list[dict] = []
     skipped = 0
@@ -51,7 +66,7 @@ def load_records(path: Path) -> tuple[list[dict], int]:
             except json.JSONDecodeError:
                 skipped += 1
                 continue
-            if not isinstance(obj, dict) or not isinstance(obj.get("scores"), dict):
+            if not isinstance(obj, dict) or not (is_assessment(obj) or is_search(obj)):
                 skipped += 1
                 continue
             records.append(obj)
@@ -99,8 +114,54 @@ def _model_stats(records: list[dict], field: str) -> dict | None:
     }
 
 
-def compute_stats(records: list[dict]) -> dict:
-    """从记录列表计算统计信息（纯函数，便于测试）。"""
+def _search_stats(records: list[dict]) -> dict:
+    """联网检索的花销统计。
+
+    分母是**所有可能检索的请求**（包括最终 search_count=0 的那些）：
+    只统计花了钱的那些，就永远算不出「多少比例的请求真的花了钱」，
+    而这正是「只在识别到地点时才检索」这条规则有没有生效的唯一证据。
+    """
+    counts = [int(r["search_count"]) for r in records]
+    if not counts:
+        return {
+            "n": 0,
+            "total": 0,
+            "mean": 0.0,
+            "max": 0,
+            "zero": 0,
+            "by_kind": {},
+            "statuses": {},
+        }
+    by_kind: dict[str, dict] = {}
+    for record in records:
+        kind = str(record.get("kind", "unknown"))
+        bucket = by_kind.setdefault(kind, {"n": 0, "total": 0})
+        bucket["n"] += 1
+        bucket["total"] += int(record["search_count"])
+    for bucket in by_kind.values():
+        bucket["mean"] = round(bucket["total"] / bucket["n"], 2)
+    return {
+        "n": len(counts),
+        "total": sum(counts),
+        "mean": round(statistics.mean(counts), 2),
+        "max": max(counts),
+        "zero": sum(1 for c in counts if c == 0),
+        "by_kind": dict(sorted(by_kind.items())),
+        "statuses": dict(
+            sorted(Counter(str(r.get("search_status", "unknown")) for r in records).items())
+        ),
+    }
+
+
+def compute_stats(all_records: list[dict]) -> dict:
+    """从记录列表计算统计信息（纯函数，便于测试）。
+
+    评估记录与检索记录分开统计：total / models / languages 等只看评估记录，
+    search 块只看检索记录。混在一起的分母没有任何意义。
+    """
+    records = [r for r in all_records if is_assessment(r)]
+    search_records = [r for r in all_records if is_search(r) and not is_assessment(r)]
+
     models = {}
     for field in MODEL_FIELDS:
         stats = _model_stats(records, field)
@@ -117,6 +178,7 @@ def compute_stats(records: list[dict]) -> dict:
     return {
         "total": len(records),
         "models": models,
+        "search": _search_stats(search_records),
         "exposure_levels": dict(sorted(exposure_levels.items())),
         "languages": dict(
             sorted(Counter(str(r.get("language", "unknown")) for r in records).items())
@@ -128,12 +190,33 @@ def compute_stats(records: list[dict]) -> dict:
     }
 
 
+def _print_search(search: dict) -> None:
+    """联网检索花销：总次数、均值，以及零检索请求的占比。"""
+    if not search.get("n"):
+        return
+    n = search["n"]
+    print()
+    print(f"联网检索花销（可能检索的请求 n={n}）：")
+    print(
+        f"  总检索次数 {search['total']}  均值 {search['mean']} 次/请求  "
+        f"单次最多 {search['max']} 次  零检索 {search['zero']} 次"
+        f"（{round(search['zero'] * 100.0 / n, 1)}%）"
+    )
+    for kind, bucket in search.get("by_kind", {}).items():
+        print(f"  {kind:>12}  n={bucket['n']:<5} 合计 {bucket['total']:<5} 均值 {bucket['mean']}")
+    statuses = "  ".join(f"{k}={v}" for k, v in search.get("statuses", {}).items())
+    if statuses:
+        print(f"  状态分布：{statuses}")
+
+
 def print_report(stats: dict, skipped: int, path: Path) -> None:
     """按人类可读格式打印统计报告。"""
     total = stats["total"]
+    search = stats.get("search") or {}
     print(f"评测数据文件：{path}")
     print(f"记录总数：{total}（跳过坏行 {skipped} 条，其中 MOCK 记录 {stats['mock_count']} 条）")
     if total == 0:
+        _print_search(search)  # 只有检索记录的文件也该看得到花销
         return
 
     for field, label in MODEL_FIELDS.items():
@@ -175,6 +258,8 @@ def print_report(stats: dict, skipped: int, path: Path) -> None:
     if stats["epi_weeks"]:
         weeks = "  ".join(f"W{w}={c}" for w, c in stats["epi_weeks"].items())
         print(f"\n流行病学周分布：{weeks}")
+
+    _print_search(search)
 
 
 def main(argv: list[str] | None = None) -> int:

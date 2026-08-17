@@ -43,8 +43,8 @@ Append an object to `scenarios.json`:
 {
   "id": "kebab-case-unique-id",
   "description": "What behavior this pins down and why it matters",
-  "endpoint": "assess",            // or "chat"
-  "request": { ...full request body for /api/assess or /api/chat... },
+  "endpoint": "assess",            // or "chat" / "destination"
+  "request": { ...full request body for that endpoint... },
   "checks": [ {"type": "status", "expect": 200}, ... ]
 }
 ```
@@ -77,7 +77,10 @@ Guidelines:
 | `reply_nonempty` | — | Chat only: `reply` is a non-empty string. |
 | `reply_mentions_tier` | — | Chat only: the reply references the overall tier computed from the request's context (highest of the three levels), using the per-language tier labels in `eval_run.py`. |
 | `scores_match_scenario` | `ref` | The runner executes the scenario with id `ref` and all three `z` values match exactly. Used to prove that exposure answers and unknown-vs-no answers never move the model scores. |
-| `sources_urls_allowed` | `min_sources`, `max_sources` (both optional) | Chat only: every URL appearing in `reply` is present in `sources`, and the source count falls within the given bounds. This is the harness-side guard on the no-fabricated-citation invariant — the app enforces it too, in `app/verifier.py`, and the two checks are written independently. |
+| `sources_urls_allowed` | `min_sources`, `max_sources` (both optional) | Chat / destination: every URL appearing in the generated text (`reply`, `recent_findings`, `advice`) is present in `sources`, and the source count falls within the given bounds. This is the harness-side guard on the no-fabricated-citation invariant — the app enforces it too, in `app/verifier.py`, and the two checks are written independently. |
+| `sources_origins` | `expect_origins` (optional) | Every source carries an `origin` of `who` or `search`, and each origin listed in `expect_origins` appears at least once. Provenance is the point: a WHO Disease Outbreak News item and a page a search engine returned are not equally hard, and the reader has to be able to tell them apart. |
+| `search_count` | `expect` or `max` | Chat only: `body["search_count"]` equals `expect` (or is at most `max`). `expect: 0` is how "a question with no place in it must not buy a single web search" is pinned. |
+| `no_model_scores` | — | Destination only: the response carries none of `dengue`, `worsening`, `severe`, `epi_week`, `advice_source`. A destination lookup produces travel context, never a score — inventing a "destination risk score" from a coarse country table is exactly what this service does not do. |
 | `advice_source` | `expect` | `body["advice_source"]` equals `expect` (`llm` or `template`). Distinguishes advice the model produced and that passed verification from the template fallback used when generation fails or keeps violating the rules. |
 
 The lexicons and tier labels are deliberately **duplicated** in `eval_run.py`

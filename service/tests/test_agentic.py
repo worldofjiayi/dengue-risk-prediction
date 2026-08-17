@@ -247,10 +247,14 @@ def test_mock_chat_with_a_location_returns_citable_sources(client, question, lan
     body = client.post("/api/chat", json=chat(question=question, language=language)).json()
 
     assert body["reply"].strip()
-    assert body["sources"], "提到地名就该有工具结果"
+    assert body["sources"], "提到地名就该有来源"
+    origins = {s["origin"] for s in body["sources"]}
+    assert origins == {"who", "search"}, "两层来源都要出现，并且各自标好出处"
     for source in body["sources"]:
-        assert set(source) == {"title", "date", "url"}
-        assert source["url"].startswith(WHO_PREFIX)
+        assert set(source) == {"title", "date", "url", "origin"}
+        assert source["url"].startswith("http")
+        if source["origin"] == "who":
+            assert source["url"].startswith(WHO_PREFIX)
     # 回复里出现的每个链接都必须在 sources 里——这就是那条不变量
     assert verify_chat_reply(body["reply"], language, [s["url"] for s in body["sources"]]) == []
 
@@ -289,7 +293,11 @@ def test_history_mentioning_a_place_still_triggers_the_tool(client):
 
 
 def test_fabricated_url_forces_the_localised_fallback(live_client, monkeypatch):
-    """模型编了一个 who.int 链接：两轮都编，就必须换成兜底句、清空 sources。"""
+    """模型编了一个 who.int 链接：两轮都编，就必须换成兜底句、清空 sources。
+
+    问题里刻意不提地名，走的是**函数工具**那条路（没有地点就不检索）。
+    检索那条路上的同一条不变量由 tests/test_search.py 单独守着。
+    """
     from app.deepseek_client import DeepSeekClient
     from app.pipeline import _UNRELIABLE_REPLY
 
@@ -298,18 +306,19 @@ def test_fabricated_url_forces_the_localised_fallback(live_client, monkeypatch):
     async def fake(self, system, messages, tools, tool_executor, **kwargs):
         calls.append(messages)
         return {
-            "reply": "Singapore is fine, see https://www.who.int/made-up-page for details.",
+            "reply": "You are fine, see https://www.who.int/made-up-page for details.",
             "tool_results": [],
         }
 
     monkeypatch.setattr(DeepSeekClient, "chat_with_tools", fake)
-    resp = live_client.post("/api/chat", json=chat(question="Is Singapore risky?"))
+    resp = live_client.post("/api/chat", json=chat(question="Am I at risk?"))
 
     assert resp.status_code == 200
     body = resp.json()
     assert len(calls) == 2  # 首次 + 一次带违规说明的重问
     assert body["reply"] == _UNRELIABLE_REPLY["en"]
     assert body["sources"] == []
+    assert body["search_count"] == 0  # 没有地点 = 没花过检索钱
     assert "who.int" not in body["reply"]
 
 
@@ -357,7 +366,12 @@ def test_a_url_that_the_tool_did_return_is_accepted(live_client, monkeypatch):
     body = live_client.post("/api/chat", json=chat()).json()
 
     assert body["sources"] == [
-        {"title": "Dengue - Global situation", "date": "2024-05-30", "url": url}
+        {
+            "title": "Dengue - Global situation",
+            "date": "2024-05-30",
+            "url": url,
+            "origin": "who",
+        }
     ]
     assert url in body["reply"]
 

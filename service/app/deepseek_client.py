@@ -1,13 +1,22 @@
-"""DeepSeek 客户端：OpenAI 兼容的 /chat/completions 调用。
+"""DeepSeek 客户端：OpenAI 兼容的 /chat/completions 调用 + Anthropic 兼容的联网检索。
 
-两种调用方式：
-  chat_json       —— 强制 response_format=json_object，解析失败会把错误回喂给模型重试；
-                     用于「备注症状抽取」与「建议生成」。
-  chat_with_tools —— 纯文本输出（不加 response_format），并带函数调用
-                     （OpenAI tools / tool_calls）：用于 /api/chat。聊天回复应当是
-                     给人读的散文，套一层 JSON 只会让模型把精力花在格式上。
-                     要不要查流行病学情报由模型自己决定，客户端只负责搬运——
-                     真正执行工具的函数由流水线注入（tool_executor）。
+三种调用方式：
+  chat_json            —— 强制 response_format=json_object，解析失败会把错误回喂给模型重试；
+                          用于「备注症状抽取」与「建议生成」。
+  chat_with_tools      —— 纯文本输出（不加 response_format），并带函数调用
+                          （OpenAI tools / tool_calls）：用于没有地点的 /api/chat。
+                          聊天回复应当是给人读的散文，套一层 JSON 只会让模型把精力
+                          花在格式上。要不要查流行病学情报由模型自己决定，客户端只负责
+                          搬运——真正执行工具的函数由流水线注入（tool_executor）。
+  chat_anthropic_search —— **换一个协议**：DeepSeek 的联网检索只在 Anthropic 兼容端点
+                          （<base>/anthropic/v1/messages）上提供，OpenAI 端点没有这个
+                          服务端工具。用于 /api/destination 与「问题里出现了地点」的
+                          /api/chat。返回 {"reply", "sources", "search_count"}。
+
+这三条路共用一套超时/异常约定（失败一律抛 DeepSeekError），但**不共用协议**：
+Anthropic 那条把 system 提到顶层、把回复拆成 content 块，检索结果作为
+web_search_tool_result 块回来，真实链接就藏在这些块里。客户端只做搬运与解析，
+「什么时候该检索」是流水线的产品决策，不在这里。
 
 MOCK_MODE=true 时不发任何网络请求，直接返回可信假数据，便于本地演示与测试。
 假建议按**风险档位**（low/medium/high）分三套，让演示能看出差异。
@@ -35,6 +44,20 @@ _JSON_RETRIES = 2
 
 # 带工具的对话最多来回几轮（一轮 = 一次模型调用 + 执行它要求的所有工具）
 _DEFAULT_TOOL_ROUNDS = 2
+
+# ---------- Anthropic 兼容端点（联网检索唯一可用的协议）----------
+
+# 相对 DEEPSEEK_BASE_URL 的路径
+ANTHROPIC_MESSAGES_PATH = "/anthropic/v1/messages"
+ANTHROPIC_VERSION = "2023-06-01"
+
+# 服务端检索工具的类型标识（由服务端执行，不需要我们回传结果）
+WEB_SEARCH_TOOL_TYPE = "web_search_20250305"
+WEB_SEARCH_TOOL_NAME = "web_search"
+
+# 检索调用的默认输出预算。**不要调小**：实测 700 tokens 会被 max_tokens 截断，
+# 因为检索结果本身就占了约 13.9k 输入 token，模型需要足够篇幅把它们讲完。
+SEARCH_MAX_TOKENS = 4000
 
 
 class DeepSeekError(Exception):
@@ -330,6 +353,133 @@ def fallback_advice(language: str, tier: str) -> dict:
 build_mock_advice = fallback_advice
 
 
+# ---- 出行前建议：与「已经生病了」那套刻意分开的一份文案 ----
+#
+# /api/destination 的用户还没生病，也没有评分。把 _MOCK_MEDICAL 那套
+# 「您本次评估的风险为…」直接端过去会答非所问，所以就医与监测另写一份，
+# 只有防蚊那部分与评估路径共用（防蚊建议对病人和旅客是同一件事）。
+# 分两档：endemic（high / moderate）与 quiet（low / none / unknown）——
+# 再细分就要开始编数字了，那正是这个服务不做的事。
+_ENDEMIC_LEVELS: tuple[str, ...] = ("high", "moderate")
+
+_TRAVEL_MEDICAL: dict[str, dict[str, list[str]]] = {
+    "zh-CN": {
+        "endemic": [
+            "这是登革热流行地区：出发前先了解当地的就医渠道，随身带好保险与联系方式。",
+            "旅途中或回程后两周内出现发热，请尽快就医，并主动告知医生这段旅行史。",
+        ],
+        "quiet": [
+            "该地区目前没有持续的本地传播记录，无需为登革热做特别的医疗准备。",
+            "若旅途中或回程后两周内出现发热，仍请就医并说明旅行史——发热的原因不止一种。",
+        ],
+    },
+    "zh-TW": {
+        "endemic": [
+            "這是登革熱流行地區：出發前先了解當地的就醫管道，隨身帶好保險與聯絡方式。",
+            "旅途中或回程後兩週內出現發燒，請儘快就醫，並主動告知醫師這段旅遊史。",
+        ],
+        "quiet": [
+            "該地區目前沒有持續的本地傳播紀錄，不需為登革熱做特別的醫療準備。",
+            "若旅途中或回程後兩週內出現發燒，仍請就醫並說明旅遊史——發燒的原因不只一種。",
+        ],
+    },
+    "en": {
+        "endemic": [
+            "This is a dengue-endemic area: before you travel, find out how to reach medical care "
+            "there and keep your insurance details with you.",
+            "If you develop a fever during the trip or within two weeks of returning, seek medical "
+            "care and tell the clinician where you have been.",
+        ],
+        "quiet": [
+            "There is no record of sustained local transmission here, so no dengue-specific medical "
+            "preparation is needed for the trip.",
+            "If you develop a fever during the trip or within two weeks of returning, still see a "
+            "clinician and mention the travel — fever has more than one cause.",
+        ],
+    },
+    "es": {
+        "endemic": [
+            "Es una zona endémica de dengue: antes del viaje averigüe cómo acceder a atención médica "
+            "allí y lleve consigo los datos de su seguro.",
+            "Si aparece fiebre durante el viaje o en las dos semanas posteriores, busque atención "
+            "médica e informe al personal de que estuvo allí.",
+        ],
+        "quiet": [
+            "No hay registro de transmisión local sostenida en la zona, con lo que no se requiere "
+            "ninguna preparación médica específica para el dengue.",
+            "Si aparece fiebre durante el viaje o en las dos semanas posteriores, consulte igualmente "
+            "e indique el viaje: la fiebre tiene más de una causa.",
+        ],
+    },
+    "pt": {
+        "endemic": [
+            "Esta é uma área endêmica de dengue: antes da viagem, descubra como chegar ao atendimento "
+            "médico local e leve os dados do seu seguro.",
+            "Se surgir febre durante a viagem ou nas duas semanas seguintes ao retorno, procure "
+            "atendimento médico e informe onde esteve.",
+        ],
+        "quiet": [
+            "Não há registro de transmissão local sustentada nessa área, portanto não é preciso "
+            "nenhuma preparação médica específica para dengue.",
+            "Se surgir febre durante a viagem ou nas duas semanas seguintes, procure um profissional "
+            "mesmo assim e informe a viagem — febre tem mais de uma causa.",
+        ],
+    },
+}
+
+_TRAVEL_MONITORING: dict[str, list[str]] = {
+    "zh-CN": [
+        "旅途中每天留意有没有发热、头痛、眼后痛或皮疹。",
+        "回程后两周内继续关注体温——这段时间正好覆盖登革热的潜伏期。",
+        "一旦出现持续呕吐、剧烈腹痛、出血表现或嗜睡，请立即就医。",
+    ],
+    "zh-TW": [
+        "旅途中每天留意有沒有發燒、頭痛、眼後痛或皮疹。",
+        "回程後兩週內持續關注體溫——這段時間正好涵蓋登革熱的潛伏期。",
+        "一旦出現持續嘔吐、劇烈腹痛、出血表現或嗜睡，請立即就醫。",
+    ],
+    "en": [
+        "While you are there, watch each day for fever, headache, pain behind the eyes or a rash.",
+        "Keep checking your temperature for two weeks after you get back — that window covers the "
+        "incubation period.",
+        "Persistent vomiting, severe abdominal pain, bleeding or drowsiness means going to a doctor "
+        "straight away.",
+    ],
+    "es": [
+        "Durante la estancia, vigile cada día si aparecen fiebre, dolor de cabeza, dolor detrás de "
+        "los ojos o erupción.",
+        "Siga controlando la temperatura las dos semanas posteriores al regreso: ese margen cubre el "
+        "periodo de incubación.",
+        "Ante vómitos persistentes, dolor abdominal intenso, sangrado o somnolencia, acuda de "
+        "inmediato a un centro de salud.",
+    ],
+    "pt": [
+        "Durante a estadia, observe todos os dias se surgem febre, dor de cabeça, dor atrás dos olhos "
+        "ou manchas na pele.",
+        "Continue medindo a temperatura nas duas semanas após o retorno — esse intervalo cobre o "
+        "período de incubação.",
+        "Vômitos persistentes, dor abdominal intensa, sangramento ou sonolência pedem atendimento "
+        "imediato.",
+    ],
+}
+
+
+def fallback_travel_advice(language: str, endemicity: str) -> dict:
+    """出行前建议：{"protection": [...], "medical": [...], "monitoring": [...]}。
+
+    与 fallback_advice 一样，这是**唯一一份**文案：/api/destination 无论检索成功
+    与否都用它，演示模式与线上完全相同。它不来自模型，因此永远可用、永远合规。
+    键顺序与 schemas.DestinationAdvice 一致（protection 在前）。
+    """
+    lang = language if language in _MOCK_PROTECTION else _DEFAULT_LANG
+    bucket = "endemic" if endemicity in _ENDEMIC_LEVELS else "quiet"
+    return {
+        "protection": list(_MOCK_PROTECTION[lang]),
+        "medical": list(_TRAVEL_MEDICAL[lang][bucket]),
+        "monitoring": list(_TRAVEL_MONITORING[lang]),
+    }
+
+
 def build_mock_chat_reply(language: str, tier: str) -> str:
     """按语言与风险档位组装假聊天回复（引用用户自己的风险等级）。"""
     lang, level = _normalise(language, tier)
@@ -442,6 +592,237 @@ def build_mock_tool_reply(language: str, result: dict) -> str:
         season=season,
         cite=cite,
     )
+
+
+# ---------- MOCK 的「联网检索」：固定的真实公共卫生页面，不是编出来的链接 ----------
+#
+# 这三条都是**真实存在且长期稳定**的页面，和真实检索会返回的东西同一类：
+# 一条 WHO 疾病暴发新闻条目、两个区域监测入口。刻意不编造
+# "https://health.gov.xx/dengue-2026-report" 这种看起来像真的的假链接——
+# 演示模式给出的引用如果点不开，「不许编造来源」这条不变量在演示里就是假的。
+# 第二条故意没有日期：真实检索经常拿不到 page_age，date=None 的分支必须被走到。
+MOCK_SEARCH_SOURCES: tuple[dict, ...] = (
+    {
+        "title": "Dengue - Global situation (WHO Disease Outbreak News)",
+        "url": "https://www.who.int/emergencies/disease-outbreak-news/item/2024-DON518",
+        "date": "2024-05-30",
+    },
+    {
+        "title": "Dengue - PAHO/WHO",
+        "url": "https://www.paho.org/en/topics/dengue",
+        "date": None,
+    },
+    {
+        "title": "Dengue worldwide overview - ECDC",
+        "url": "https://www.ecdc.europa.eu/en/dengue-monthly",
+        "date": "2026-07-31",
+    },
+)
+
+# 演示模式的检索回复：**明说这是演示**、明说时间窗是最近三个月、只引用上面那份清单里的链接。
+# 末尾的 {cite} 由 build_mock_search_reply 填成第一条来源的 URL。
+_MOCK_SEARCH_TEMPLATES: dict[str, str] = {
+    "zh-CN": (
+        "（演示模式回复，未真正联网检索）以下是关于 {location} 最近三个月登革热情况的示例整理：\n"
+        "- 公共卫生机构的登革热监测页面持续更新，需要以官方最新数据为准。\n"
+        "- 传播强度随季节与降雨变化，出行前后都应做好防蚊防护。\n"
+        "- 演示模式下没有真实检索结果，因此不给出具体病例数字。\n"
+        "参考来源：{cite}"
+    ),
+    "zh-TW": (
+        "（示範模式回覆，未真正連網檢索）以下是關於 {location} 最近三個月登革熱情況的範例整理：\n"
+        "- 公共衛生機構的登革熱監測頁面持續更新，需以官方最新資料為準。\n"
+        "- 傳播強度隨季節與降雨變化，出行前後都應做好防蚊防護。\n"
+        "- 示範模式下沒有真實檢索結果，因此不提供具體病例數字。\n"
+        "參考來源：{cite}"
+    ),
+    "en": (
+        "(Demo-mode reply — no live web search was run.) Here is a sample summary of the dengue "
+        "situation in {location} over the last three months:\n"
+        "- The public-health surveillance pages for the area are updated regularly, and the official "
+        "figures there are the ones that count.\n"
+        "- Transmission follows the rainy season, so protection against mosquito bites matters "
+        "throughout the trip.\n"
+        "- No real search ran in demo mode, so no case counts are quoted here.\n"
+        "Source: {cite}"
+    ),
+    "es": (
+        "(Respuesta en modo demostración: no se realizó una búsqueda web real.) Este es un resumen de "
+        "ejemplo sobre la situación del dengue en {location} en los últimos tres meses:\n"
+        "- Las páginas de vigilancia de salud pública se actualizan con frecuencia y son las cifras "
+        "oficiales las que valen.\n"
+        "- La transmisión sigue a la temporada de lluvias, con lo que conviene protegerse de las "
+        "picaduras durante todo el viaje.\n"
+        "- En modo demostración no se ejecutó ninguna búsqueda, por eso no se citan casos.\n"
+        "Fuente: {cite}"
+    ),
+    "pt": (
+        "(Resposta em modo de demonstração — nenhuma busca real foi feita.) Este é um resumo de "
+        "exemplo sobre a situação da dengue em {location} nos últimos três meses:\n"
+        "- As páginas de vigilância em saúde pública são atualizadas com frequência, e os números "
+        "oficiais são os que valem.\n"
+        "- A transmissão acompanha o período de chuvas, então a proteção contra picadas importa "
+        "durante toda a viagem.\n"
+        "- Nenhuma busca real foi executada, portanto não há contagem de casos aqui.\n"
+        "Fonte: {cite}"
+    ),
+}
+
+
+# 检索一无所获时的说明句：**明说查不到**，不要用泛泛之谈填满这一段
+_MOCK_SEARCH_EMPTY: dict[str, str] = {
+    "zh-CN": "（演示模式回复）没有检索到这个地区最近三个月的登革热资料，因此不提供任何结论与链接。",
+    "zh-TW": "（示範模式回覆）沒有檢索到這個地區最近三個月的登革熱資料，因此不提供任何結論與連結。",
+    "en": (
+        "(Demo-mode reply.) No recent information about the dengue situation there came back for the "
+        "last three months, and so no findings or links are given."
+    ),
+    "es": (
+        "(Respuesta en modo demostración.) No se encontró información sobre la situación del dengue "
+        "allí en los últimos tres meses, con lo que no se dan conclusiones ni enlaces."
+    ),
+    "pt": (
+        "(Resposta em modo de demonstração.) Não foi encontrada informação sobre a dengue nesse local "
+        "nos últimos três meses, e por isso não há conclusões nem links."
+    ),
+}
+
+
+def build_mock_search(language: str, location: str) -> dict:
+    """演示模式下的一次「联网检索」。形状与真实解析结果逐字段一致。
+
+    location 为空时表示上游没能认出任何地点：这时**不给来源**，回复也直说查不到——
+    与真实检索一无所获时该走的那条路完全相同，演示因此能覆盖 degraded 分支。
+    """
+    lang = language if language in _MOCK_SEARCH_TEMPLATES else _DEFAULT_LANG
+    place = (location or "").strip()
+    if not place:
+        return {"reply": _MOCK_SEARCH_EMPTY[lang], "sources": [], "search_count": 0}
+    sources = [dict(s) for s in MOCK_SEARCH_SOURCES]
+    reply = _MOCK_SEARCH_TEMPLATES[lang].format(location=place, cite=sources[0]["url"])
+    return {"reply": reply, "sources": sources, "search_count": 1}
+
+
+# ---------- Anthropic 协议：消息转换与响应解析 ----------
+
+
+def to_anthropic_messages(messages: list[dict]) -> list[dict]:
+    """把 OpenAI 风格的消息列表转成 Anthropic 的 messages。
+
+    两处差异：system 不是一条消息（由顶层 system 参数承载，这里直接丢弃），
+    content 只保留字符串。空内容的消息会被跳过——Anthropic 端点拒绝空文本块。
+    """
+    converted: list[dict] = []
+    for message in messages:
+        role = str(message.get("role") or "user")
+        if role == "system":  # system 走顶层参数，不能混在 messages 里
+            continue
+        content = message.get("content")
+        text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
+        if not (text or "").strip():
+            continue
+        converted.append(
+            {"role": "assistant" if role == "assistant" else "user", "content": text}
+        )
+    return converted
+
+
+def _harvest_sources(node, sources: list[dict], seen: set[str]) -> None:
+    """在一个 web_search_tool_result 块里递归找出所有 url。
+
+    为什么递归：真实返回里 url 埋在 content -> [ {type: web_search_result, url, title,
+    page_age, encrypted_content} ] 这样的嵌套结构里，而这个结构没有稳定契约。
+    只认「带 http(s) url 的对象」，顺带取同级的 title / page_age，其余一律不碰。
+    """
+    if isinstance(node, list):
+        for item in node:
+            _harvest_sources(item, sources, seen)
+        return
+    if not isinstance(node, dict):
+        return
+
+    raw_url = node.get("url")
+    if isinstance(raw_url, str):
+        url = raw_url.strip()
+        if url.lower().startswith(("http://", "https://")) and url not in seen:
+            seen.add(url)
+            title = node.get("title")
+            date = node.get("page_age") or node.get("date")
+            sources.append(
+                {
+                    "title": " ".join(str(title).split()) if title else url,
+                    "url": url,
+                    "date": str(date) if date else None,
+                }
+            )
+    for value in node.values():
+        if isinstance(value, (dict, list)):
+            _harvest_sources(value, sources, seen)
+
+
+def _search_count_of(payload: dict, content: list) -> int:
+    """本次真的检索了几次。优先用 usage 报的数字，拿不到就数 server_tool_use 块。"""
+    usage = payload.get("usage")
+    if isinstance(usage, dict):
+        server = usage.get("server_tool_use")
+        if isinstance(server, dict):
+            requests = server.get("web_search_requests")
+            if isinstance(requests, bool):
+                pass
+            elif isinstance(requests, int):
+                return max(0, requests)
+    return sum(
+        1
+        for block in content
+        if isinstance(block, dict)
+        and block.get("type") == "server_tool_use"
+        and block.get("name") == WEB_SEARCH_TOOL_NAME
+    )
+
+
+def parse_search_response(payload: dict, purpose: str = "search") -> dict:
+    """解析 Anthropic /v1/messages 的返回 -> {"reply", "sources", "search_count"}。
+
+    content 是一个块列表，可能出现四种 type：
+        thinking               —— 思考过程，**不进回复**
+        text                   —— 真正要给用户看的文字
+        server_tool_use        —— 模型发起了一次检索（服务端执行）
+        web_search_tool_result —— 检索结果，真实链接就在这里
+    未知 type 一律忽略：多一种块不该让整轮请求失败。
+
+    stop_reason == "max_tokens" 只记警告不报错——半截答案仍然比 502 有用，
+    但调用方（和日志）必须知道它是半截的。
+    """
+    if not isinstance(payload, dict):
+        raise DeepSeekError(f"检索接口返回结构异常：顶层不是对象（purpose={purpose}）")
+    content = payload.get("content")
+    if not isinstance(content, list):
+        raise DeepSeekError(f"检索接口返回结构异常：缺少 content 列表（purpose={purpose}）")
+
+    texts: list[str] = []
+    sources: list[dict] = []
+    seen: set[str] = set()
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        btype = block.get("type")
+        if btype == "text":
+            text = block.get("text")
+            if isinstance(text, str) and text.strip():
+                texts.append(text.strip())
+        elif btype == "web_search_tool_result":
+            _harvest_sources(block, sources, seen)
+
+    if payload.get("stop_reason") == "max_tokens":
+        logger.warning(
+            "检索回复被 max_tokens 截断（purpose=%s）：答案可能不完整，考虑调大 max_tokens",
+            purpose,
+        )
+    return {
+        "reply": "\n\n".join(texts).strip(),
+        "sources": sources,
+        "search_count": _search_count_of(payload, content),
+    }
 
 
 # ---------- 函数调用（tools）辅助 ----------
@@ -635,6 +1016,85 @@ class DeepSeekClient:
             f"DeepSeek 连续 {1 + _JSON_RETRIES} 次未能返回合法 JSON（purpose={purpose}）"
         )
 
+
+    async def chat_anthropic_search(
+        self,
+        system: str,
+        messages: list[dict],
+        language: str = "zh-CN",
+        max_uses: int = 2,
+        max_tokens: int = SEARCH_MAX_TOKENS,
+        purpose: str = "search",
+        mock_location: str = "",
+    ) -> dict:
+        """带联网检索的一次问答，走 **Anthropic 兼容端点**。
+
+        返回 {"reply": str, "sources": [{"title","url","date"|None}], "search_count": int}。
+
+        为什么不能复用 chat_with_tools：DeepSeek 的 web_search 是**服务端工具**，
+        只在 /anthropic/v1/messages 上提供。OpenAI 端点没有它，硬塞 tools 也只会
+        得到一个普通的函数调用请求。协议不同、鉴权头不同、响应结构不同，
+        因此这里是一条独立的路径，而不是给老方法加个参数。
+
+        max_uses <= 0 表示**不挂检索工具**（此时就是一次普通的 Anthropic 调用）——
+        调用方据此实现「没有地点就不检索」，不必在这里判断产品规则。
+
+        mock_location 仅在 MOCK_MODE 下使用：决定演示数据里那份来源清单要不要给。
+        """
+        settings = get_settings()
+
+        if settings.mock_mode:
+            logger.info(
+                "MOCK_MODE 开启，返回检索假数据（language=%s, location=%r）",
+                language,
+                mock_location,
+            )
+            return build_mock_search(language, mock_location)
+
+        url = settings.deepseek_base_url.rstrip("/") + ANTHROPIC_MESSAGES_PATH
+        headers = {
+            "x-api-key": settings.deepseek_api_key,
+            "anthropic-version": ANTHROPIC_VERSION,
+            "Content-Type": "application/json",
+        }
+        payload: dict = {
+            "model": settings.deepseek_model,
+            "max_tokens": max_tokens,
+            "system": system,
+            "messages": to_anthropic_messages(messages),
+        }
+        if max_uses > 0:
+            payload["tools"] = [
+                {
+                    "type": WEB_SEARCH_TOOL_TYPE,
+                    "name": WEB_SEARCH_TOOL_NAME,
+                    "max_uses": max_uses,
+                }
+            ]
+
+        try:
+            async with httpx.AsyncClient(timeout=settings.deepseek_timeout) as client:
+                resp = await client.post(url, json=payload, headers=headers)
+                resp.raise_for_status()
+                data = resp.json()
+        except httpx.HTTPStatusError as exc:
+            raise DeepSeekError(
+                f"检索接口返回错误状态码 {exc.response.status_code}（purpose={purpose}）"
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise DeepSeekError(f"无法连接检索接口（purpose={purpose}）：{exc}") from exc
+        except ValueError as exc:  # 响应不是 JSON
+            raise DeepSeekError(f"检索接口返回的不是 JSON（purpose={purpose}）") from exc
+
+        outcome = parse_search_response(data, purpose=purpose)
+        logger.info(
+            "检索完成（purpose=%s）：检索 %d 次，取回 %d 条来源，回复 %d 字",
+            purpose,
+            outcome["search_count"],
+            len(outcome["sources"]),
+            len(outcome["reply"]),
+        )
+        return outcome
 
     async def chat_with_tools(
         self,

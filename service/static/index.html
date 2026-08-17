@@ -40,10 +40,26 @@
         <div class="hero-badge" id="hero-badge">登革热 · 风险自评</div>
         <h1 class="hero-title" id="hero-title">登革热<br />风险自测</h1>
         <p class="hero-subtitle" id="hero-subtitle">回答症状与病史问题，获得风险参考与防护建议</p>
-        <button id="btn-start" class="btn btn-hero" type="button">
-          <span id="btn-start-text">开始评估</span>
-          <span class="btn-arrow" aria-hidden="true">→</span>
-        </button>
+
+        <!-- 两条入口：出行前查目的地 / 已有症状做自测（两种意图，刻意不混在一起） -->
+        <div class="hero-actions">
+          <button id="btn-destination" class="hero-cta" type="button">
+            <span class="hero-cta-icon" aria-hidden="true">✈️</span>
+            <span class="hero-cta-body">
+              <span class="hero-cta-title" id="btn-destination-title">我要去某个地方</span>
+              <span class="hero-cta-desc" id="btn-destination-desc">查看目的地的登革热情况</span>
+            </span>
+            <span class="btn-arrow" aria-hidden="true">→</span>
+          </button>
+          <button id="btn-start" class="hero-cta" type="button">
+            <span class="hero-cta-icon" aria-hidden="true">🌡️</span>
+            <span class="hero-cta-body">
+              <span class="hero-cta-title" id="btn-start-text">我有症状</span>
+              <span class="hero-cta-desc" id="btn-start-desc">回答几个问题，获得风险参考</span>
+            </span>
+            <span class="btn-arrow" aria-hidden="true">→</span>
+          </button>
+        </div>
       </div>
 
       <!-- 底部小字：免责声明 + 隐私说明 -->
@@ -193,6 +209,24 @@
           </div>
         </div>
 
+        <!-- 旅行背景：来自目的地查询，刻意标注「未参与评分」 -->
+        <div id="travel-context" class="travel-card" hidden>
+          <span class="travel-mark" aria-hidden="true">✈️</span>
+          <div class="travel-body">
+            <p class="travel-line">
+              <span class="travel-label" id="travel-label">旅行背景</span>
+              <span class="travel-level" id="travel-level"></span>
+            </p>
+            <p class="travel-place" id="travel-place"></p>
+            <p class="travel-season" id="travel-season" hidden></p>
+            <p class="travel-caption" id="travel-caption"></p>
+          </div>
+        </div>
+        <p class="travel-offer" id="travel-offer" hidden>
+          <span id="travel-offer-text"></span>
+          <button id="btn-travel-offer" class="link-btn" type="button"></button>
+        </p>
+
         <div id="advice-cards" class="advice-grid"><!-- 建议卡片由 app.js 渲染 --></div>
 
         <!-- AI 追问对话 -->
@@ -231,6 +265,56 @@
         </div>
       </div>
       <div id="disclaimer-bar" class="disclaimer-bar">本结果仅供参考，不构成医疗诊断。如有不适请及时就医。</div>
+    </section>
+
+    <!-- ⑤ Destination 视图（出行前查目的地；刻意不出任何风险评分） -->
+    <section id="view-destination" class="view" hidden>
+      <div class="shell dest-shell">
+        <header class="dest-header">
+          <button id="btn-dest-back" class="back-btn" type="button">
+            <span class="back-arrow" aria-hidden="true">←</span>
+            <span id="btn-dest-back-text">返回</span>
+          </button>
+          <h2 class="dest-title" id="dest-title" tabindex="-1">目的地登革热情况</h2>
+          <p class="dest-sub" id="dest-sub"></p>
+        </header>
+
+        <form class="dest-form card" id="dest-form" novalidate>
+          <label class="field-label" for="dest-input" id="dest-input-label">目的地</label>
+          <div class="dest-input-row">
+            <input id="dest-input" class="dest-input" type="text" name="location"
+                   maxlength="120" autocomplete="off" spellcheck="false" />
+            <button id="dest-submit" class="btn btn-primary dest-submit" type="submit">查询</button>
+          </div>
+          <p class="dest-hint" id="dest-hint" role="alert" hidden></p>
+          <p class="dest-examples-label" id="dest-examples-label"></p>
+          <div class="dest-chips" id="dest-chips"></div>
+        </form>
+
+        <div class="dest-loading" id="dest-loading" hidden>
+          <div class="pulse" aria-hidden="true">
+            <span class="pulse-ring r1"></span>
+            <span class="pulse-ring r2"></span>
+            <span class="pulse-ring r3"></span>
+            <span class="pulse-core">🌍</span>
+          </div>
+          <p id="dest-loading-text" class="loading-text" aria-live="polite"></p>
+          <p id="dest-loading-sub" class="loading-sub"></p>
+        </div>
+
+        <div class="dest-error" id="dest-error" role="alert" hidden>
+          <span class="dest-error-icon" aria-hidden="true">⚠️</span>
+          <p class="dest-error-text" id="dest-error-text"></p>
+          <button id="dest-retry" class="btn btn-secondary dest-retry" type="button">重试</button>
+        </div>
+
+        <div class="dest-results" id="dest-results" hidden><!-- 结果由 app.js 渲染 --></div>
+
+        <p class="dest-cross">
+          <button id="btn-dest-to-symptoms" class="link-btn" type="button"></button>
+        </p>
+      </div>
+      <div id="dest-disclaimer-bar" class="disclaimer-bar">本结果仅供参考，不构成医疗诊断。如有不适请及时就医。</div>
     </section>
 
   </main>

@@ -33,6 +33,19 @@ class Settings(BaseSettings):
     # 演示模式：true 时 DeepSeek 与 ML 模型都返回可信假数据
     mock_mode: bool = True
 
+    # ---- 联网检索（DeepSeek Anthropic 协议的 web_search 服务端工具）----
+    #
+    # 检索是这个服务里**唯一按次计费且费用不可预测**的东西：实测一个普通问题
+    # 触发了 4 次检索、约 13.9k 输入 token。因此三个旋钮都留在配置里，
+    # 出事时不用改代码就能关掉。
+    #
+    # search_enabled            总开关：false 时任何路径都不会发起检索
+    # search_max_uses           单次请求允许的检索次数上限（传给 web_search 工具）
+    # search_cache_ttl_seconds  目的地查询的缓存有效期（按 地点 × 语言 缓存）
+    search_enabled: bool = True
+    search_max_uses: int = 2
+    search_cache_ttl_seconds: int = 6 * 60 * 60
+
     # 服务监听
     host: str = "0.0.0.0"
     port: int = 8000
