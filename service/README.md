@@ -772,7 +772,7 @@ both run for real, the latter against its canned WHO list rather than the networ
 required, and no web search is ever bought.**
 
 ```bash
-pytest tests                    # 386 tests (+1 live test, skipped unless RUN_LIVE_TESTS=1)
+pytest tests                    # 407 tests (+1 live test, skipped unless RUN_LIVE_TESTS=1)
 python scripts/eval_run.py      # 26 scenarios
 ```
 
@@ -994,7 +994,7 @@ service/
 │   └── model/
 │       └── dengue_models.json    fitted coefficients (mirror of ../model/results/)
 ├── static/                 hand-written frontend, zero external dependencies
-├── tests/                  386 pytest tests (+1 live search test, skipped by default)
+├── tests/                  407 pytest tests (+1 live search test, skipped by default)
 ├── eval/scenarios.json     26 declarative regression scenarios
 ├── scripts/eval_run.py     scenario runner (regression gate + failure library)
 ├── scripts/eval_stats.py   evaluation log statistics, including search spend
