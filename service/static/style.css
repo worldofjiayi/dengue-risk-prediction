@@ -3159,6 +3159,22 @@ ol {
   color: var(--text-3);
 }
 
+/* 政府 / 国际卫生机构来源。检索那一组里，卫生部通报和新闻转载是并排返回的，
+   这个标记让读者一眼看出哪条更可核对。沿用页面既有的「实线=更硬」的约定，
+   与虚线的「网络检索」分组标签形成对照。 */
+.src-official {
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  border-radius: 5px;
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
 .dest-model-note {
   margin-top: 14px;
   font-size: 0.75rem;

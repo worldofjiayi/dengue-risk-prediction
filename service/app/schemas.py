@@ -85,6 +85,7 @@ ModelKey = Literal["A", "B", "B2"]
 AdviceSource = Literal["llm", "template"]
 # 一条引用来源出自哪一层：WHO 疾病暴发新闻接口，还是模型的联网检索
 SourceOrigin = Literal["who", "search"]
+SourceAuthority = Literal["official", "other"]
 # 联网检索这一轮的状态：
 #   ok       —— 检索跑了，并且带回了来源
 #   degraded —— 检索被尝试过，但失败 / 一无所获 / 输出没通过校验（其余各层照常返回）
@@ -437,6 +438,11 @@ class Source(BaseModel):
     两层的可信度与时效性不同，前端要能分别标注，所以标签必须跟着链接一起走，
     而不是靠 URL 前缀去猜。
 
+    authority 是**同一层内部**的第二个区分：检索结果里，一国卫生部的通报和
+    一个新闻聚合站会并排出现（实测新加坡那次，nea.gov.sg 与 magzter.com 同列）。
+    两者可核对程度差得远，所以按域名判定是否政府/国际卫生机构，让前端能标出来。
+    判定只看域名，不看内容——这是个可核对的事实，不是对质量的评价。
+
     date 允许为空：WHO 通报一定有发布日期，检索结果经常没有。
     """
 
@@ -444,6 +450,9 @@ class Source(BaseModel):
     date: str | None = Field(default=None, description="发布日期，取不到时为 null")
     url: str = Field(..., description="来源页面地址")
     origin: SourceOrigin = Field(default="who", description="这条来源来自哪一层")
+    authority: SourceAuthority = Field(
+        default="other", description="域名是否属于政府或国际卫生机构"
+    )
 
 
 class ChatResponse(BaseModel):
@@ -576,6 +585,57 @@ def select_search_sources(
     return chosen
 
 
+# 政府域名标记：出现在国家顶级域之前（nea.gov.sg / doh.gov.ph / moph.go.th /
+# gob.mx / gouv.fr / govt.nz）。单独一个 "go" 很危险（go.com 不是政府），
+# 所以只在它后面跟着两字母国家码时才算数。
+_GOV_LABELS = frozenset({"gov", "gob", "go", "gouv", "govt"})
+
+# 没有政府域名但确属国际卫生/公共机构的，单独列出。宁可漏判也不错判：
+# 判成 official 是在告诉用户「这条更可核对」，错标的代价比漏标大。
+_OFFICIAL_HOSTS = frozenset(
+    {
+        "who.int",
+        "paho.org",
+        "europa.eu",       # ECDC 挂在 ecdc.europa.eu
+        "un.org",
+        "unicef.org",
+    }
+)
+
+
+def classify_authority(url: str) -> SourceAuthority:
+    """按域名判断这条来源是不是政府 / 国际卫生机构。
+
+    只看域名，不看内容——这样结论是可核对的事实，而不是对报道质量的评价。
+    一个卫生部的疫情通报和一个新闻聚合站的转载，读者有权一眼分清。
+
+    判定规则（任一命中即 official）：
+      · 顶级域是 gov 或 int          —— cdc.gov / who.int
+      · 倒数第二段是政府标记且顶级域是两字母国家码 —— nea.gov.sg / moph.go.th / gob.mx
+      · 域名或其父域在 _OFFICIAL_HOSTS 里 —— ecdc.europa.eu
+    """
+    raw = (url or "").strip().lower()
+    if "//" in raw:
+        raw = raw.split("//", 1)[1]
+    host = raw.split("/", 1)[0].split("?", 1)[0].split("@")[-1].split(":", 1)[0]
+    host = host.rstrip(".")
+    if not host:
+        return "other"
+
+    labels = [p for p in host.split(".") if p]
+    if len(labels) < 2:
+        return "other"
+
+    if labels[-1] in {"gov", "int"}:
+        return "official"
+    if len(labels[-1]) == 2 and labels[-2] in _GOV_LABELS:
+        return "official"
+    for i in range(len(labels) - 1):
+        if ".".join(labels[i:]) in _OFFICIAL_HOSTS:
+            return "official"
+    return "other"
+
+
 def merge_sources(
     who_notices: list[dict] | None, search_sources: list[dict] | None
 ) -> list[Source]:
@@ -586,6 +646,10 @@ def merge_sources(
 
     按 url 去重、保留顺序；WHO 在前是因为它更稳定也更容易核对。
     date 取不到就是 None（检索结果经常没有 page_age），绝不用今天的日期顶上。
+
+    检索那一段内部再把 official 的排到前面：模型引用与否是它自己的事，但
+    「哪几条来自卫生部门」应该先映入读者眼帘。**只调顺序，一条都不丢**——
+    sources 同时是校验器的白名单，删掉任何一条都可能让正确回复被判成编造链接。
     """
     merged: list[Source] = []
     seen: set[str] = set()
@@ -600,22 +664,28 @@ def merge_sources(
                 date=str(notice.get("date") or "") or None,
                 url=url,
                 origin="who",
+                authority="official",  # WHO 通报按定义就是官方来源
             )
         )
+    found: list[Source] = []
     for item in search_sources or []:
         url = str(item.get("url") or "")
         if not url or url in seen:
             continue
         seen.add(url)
         date = item.get("date")
-        merged.append(
+        found.append(
             Source(
                 title=str(item.get("title") or url),
                 date=str(date) if date else None,
                 url=url,
                 origin="search",
+                authority=classify_authority(url),
             )
         )
+    # 稳定排序：official 在前，其余保持检索返回的原顺序
+    found.sort(key=lambda s: 0 if s.authority == "official" else 1)
+    merged.extend(found)
     return merged
 
 

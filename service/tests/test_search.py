@@ -1009,3 +1009,81 @@ async def test_live_search_returns_at_least_one_real_source(monkeypatch):
     assert outcome["sources"], "检索应当带回至少一条来源"
     assert all(s["url"].startswith("http") for s in outcome["sources"])
     assert outcome["reply"].strip()
+
+
+# ---------- 来源权威性标注 ----------
+
+
+class TestSourceAuthority:
+    """检索结果里卫生部门与新闻聚合站并排出现，读者有权一眼分清。
+
+    判定只看域名，因此是可核对的事实，不是对报道质量的评价。
+    """
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://www.nea.gov.sg/dengue-zika/dengue",   # 新加坡环境局
+            "https://doh.gov.ph/advisory",                 # 菲律宾卫生部
+            "https://ddc.moph.go.th/report",               # 泰国卫生部
+            "https://www.gob.mx/salud",                    # 墨西哥卫生部
+            "https://www.gouv.fr/sante",                   # 法国政府
+            "https://www.govt.nz/travel",                  # 新西兰政府
+            "https://www.cdc.gov/dengue",                  # 顶级域即 .gov
+            "https://www.who.int/emergencies/x",           # .int
+            "https://www.ecdc.europa.eu/en/dengue-monthly",  # 允许清单里的父域
+            "https://www.paho.org/en/dengue",
+        ],
+    )
+    def test_official_domains(self, url):
+        from app.schemas import classify_authority
+
+        assert classify_authority(url) == "official"
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://www.malaymail.com/news/x",
+            "http://www.china.org.cn/world/x.shtml",
+            "https://www.magzter.com/stories/x",
+            "https://denguevisualatlas.com/th",
+            "https://go.com/whatever",          # 陷阱：go 不跟两字母国家码
+            "https://gov.example.com/fake",     # 陷阱：gov 在最前面不算
+            "https://notgov.sg/x",
+            "",
+            "not a url",
+        ],
+    )
+    def test_non_official_domains(self, url):
+        from app.schemas import classify_authority
+
+        assert classify_authority(url) == "other"
+
+    def test_who_notices_are_always_official(self):
+        from app.schemas import merge_sources
+
+        merged = merge_sources(
+            [{"title": "Dengue - Global", "date": "2024-05-30", "url": "https://www.who.int/x"}],
+            [],
+        )
+        assert merged[0].origin == "who"
+        assert merged[0].authority == "official"
+
+    def test_official_search_results_sort_first_without_dropping_any(self):
+        """只调顺序，不丢条目——sources 同时是校验器白名单。"""
+        from app.schemas import merge_sources
+
+        merged = merge_sources(
+            [],
+            [
+                {"title": "News", "url": "https://www.malaymail.com/a"},
+                {"title": "NEA", "url": "https://www.nea.gov.sg/b"},
+                {"title": "Aggregator", "url": "https://www.magzter.com/c"},
+                {"title": "MOH", "url": "https://ddc.moph.go.th/d"},
+            ],
+        )
+        assert [s.authority for s in merged] == ["official", "official", "other", "other"]
+        # 一条都不能少，否则模型真正引用过的链接可能被自己的校验器判成编造
+        assert len(merged) == 4
+        # 同类之间保持检索返回的原顺序
+        assert [s.title for s in merged] == ["NEA", "MOH", "News", "Aggregator"]

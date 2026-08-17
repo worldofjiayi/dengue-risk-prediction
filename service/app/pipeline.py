@@ -360,6 +360,8 @@ def _sources_from(tool_results: list[dict]) -> list[Source]:
                     title=str(notice.get("title", "")),
                     date=str(notice.get("date", "")),
                     url=url,
+                    origin="who",
+                    authority="official",  # WHO 通报按定义就是官方来源
                 )
             )
     return sources

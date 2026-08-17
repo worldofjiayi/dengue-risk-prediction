@@ -251,10 +251,12 @@ def test_mock_chat_with_a_location_returns_citable_sources(client, question, lan
     origins = {s["origin"] for s in body["sources"]}
     assert origins == {"who", "search"}, "两层来源都要出现，并且各自标好出处"
     for source in body["sources"]:
-        assert set(source) == {"title", "date", "url", "origin"}
+        assert set(source) == {"title", "date", "url", "origin", "authority"}
         assert source["url"].startswith("http")
+        assert source["authority"] in {"official", "other"}
         if source["origin"] == "who":
             assert source["url"].startswith(WHO_PREFIX)
+            assert source["authority"] == "official", "WHO 通报按定义就是官方来源"
     # 回复里出现的每个链接都必须在 sources 里——这就是那条不变量
     assert verify_chat_reply(body["reply"], language, [s["url"] for s in body["sources"]]) == []
 
@@ -371,6 +373,7 @@ def test_a_url_that_the_tool_did_return_is_accepted(live_client, monkeypatch):
             "date": "2024-05-30",
             "url": url,
             "origin": "who",
+            "authority": "official",
         }
     ]
     assert url in body["reply"]

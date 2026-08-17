@@ -114,7 +114,7 @@ const I18N = {
       privacy: '无需注册，不收集个人信息；补充说明不会被保存。',
       privacyLink: '隐私说明',
     },
-    sources: { label: '信息来源', who: '世界卫生组织', search: '网络检索' },
+    sources: { label: '信息来源', who: '世界卫生组织', search: '网络检索', official: '官方' },
     dest: {
       title: '目的地登革热情况',
       sub: '看看你要去的地方目前已知的登革热情况。本页不提供个人风险评分。',
@@ -377,7 +377,7 @@ const I18N = {
       privacy: '無需註冊，不蒐集個人資訊；補充說明不會被保存。',
       privacyLink: '隱私說明',
     },
-    sources: { label: '資訊來源', who: '世界衛生組織', search: '網路搜尋' },
+    sources: { label: '資訊來源', who: '世界衛生組織', search: '網路搜尋', official: '官方' },
     dest: {
       title: '目的地登革熱情況',
       sub: '看看你要去的地方目前已知的登革熱情況。本頁不提供個人風險評分。',
@@ -640,7 +640,7 @@ const I18N = {
       privacy: 'No account or personal details; free-text notes are never stored.',
       privacyLink: 'Privacy',
     },
-    sources: { label: 'Sources', who: 'World Health Organization', search: 'Web search' },
+    sources: { label: 'Sources', who: 'World Health Organization', search: 'Web search', official: 'Official' },
     dest: {
       title: 'Destination check',
       sub: 'See what is known about dengue where you are going. This page gives no personal risk score.',
@@ -903,7 +903,7 @@ const I18N = {
       privacy: 'Sin cuenta ni datos personales; los comentarios libres nunca se almacenan.',
       privacyLink: 'Privacidad',
     },
-    sources: { label: 'Fuentes', who: 'Organización Mundial de la Salud', search: 'Búsqueda web' },
+    sources: { label: 'Fuentes', who: 'Organización Mundial de la Salud', search: 'Búsqueda web', official: 'Oficial' },
     dest: {
       title: 'Consulta de destino',
       sub: 'Vea lo que se sabe sobre el dengue en el lugar al que va. Esta página no ofrece ninguna puntuación de riesgo personal.',
@@ -1166,7 +1166,7 @@ const I18N = {
       privacy: 'Sem cadastro nem dados pessoais; as observações livres nunca são armazenadas.',
       privacyLink: 'Privacidade',
     },
-    sources: { label: 'Fontes', who: 'Organização Mundial da Saúde', search: 'Busca na web' },
+    sources: { label: 'Fontes', who: 'Organização Mundial da Saúde', search: 'Busca na web', official: 'Oficial' },
     dest: {
       title: 'Consulta de destino',
       sub: 'Veja o que se sabe sobre a dengue no lugar para onde você vai. Esta página não fornece nenhuma pontuação de risco pessoal.',
@@ -2815,6 +2815,16 @@ function sourceItem(item) {
     span.className = 'src-plain';
     span.textContent = title;
     li.appendChild(span);
+  }
+
+  // 检索结果里，卫生部门与新闻站是并排返回的。后端按域名判定过 authority，
+  // 这里把政府 / 国际卫生机构标出来，读者才分得清哪条更可核对。
+  // WHO 那一组本身就写着「世界卫生组织」，再挂一个「官方」是重复的。
+  if (item.authority === 'official' && item.origin !== 'who') {
+    const badge = document.createElement('span');
+    badge.className = 'src-official';
+    badge.textContent = T().sources.official;
+    li.appendChild(badge);
   }
 
   const date = String(item.date == null ? '' : item.date).trim();
