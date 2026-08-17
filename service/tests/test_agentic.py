@@ -1,10 +1,11 @@
-"""两层「代理化」行为的集成测试：建议兜底链路 + 追问对话的工具环。
+"""Integration tests for the two "agentic" paths: advice fallback and the chat tool loop.
 
-这两条路径共同的性质是**失败时的行为**才是重点，所以测试大多在制造失败：
-上游炸掉、模型输出违规、模型编造链接。正常路径只要一两条即可。
+What these two paths share is that **the behaviour on failure** is the real subject, so
+most of the tests here manufacture failures: the upstream blows up, the model emits a
+violation, the model invents a link. One or two happy-path tests are enough.
 
-全部在 MOCK_MODE 下跑；需要真实分支时用 monkeypatch 顶掉客户端方法，
-仍然不发任何网络请求。
+Everything runs under MOCK_MODE; where the real branch is needed, monkeypatch replaces the
+client methods, and still no network request is made.
 """
 
 import pytest
@@ -33,7 +34,7 @@ def client(monkeypatch):
 
 @pytest.fixture()
 def live_client(monkeypatch):
-    """MOCK_MODE=false：走真实分支，但所有出网调用都被 monkeypatch 顶掉。"""
+    """MOCK_MODE=false: the real branch, but every outbound call is monkeypatched away."""
     monkeypatch.setenv("MOCK_MODE", "false")
     from app.config import get_settings
 
@@ -78,7 +79,7 @@ def form(**overrides) -> dict:
 
 
 def tier_of(body: dict) -> str:
-    """响应里三个模型等级的最高档（同 pipeline.overall_tier）。"""
+    """Highest of the three model levels in the response (same as pipeline.overall_tier)."""
     return max(
         (body[f]["level"] for f in ("dengue", "worsening", "severe")),
         key=["low", "medium", "high"].index,
@@ -100,7 +101,7 @@ def chat(**overrides) -> dict:
     return body
 
 
-# ================= 建议：校验 -> 重问 -> 兜底 =================
+# ================= Advice: verify -> re-ask -> fallback =================
 
 
 def test_mock_assessment_reports_template_source(client):
@@ -110,15 +111,17 @@ def test_mock_assessment_reports_template_source(client):
 
 @pytest.mark.parametrize("language", ["zh-CN", "zh-TW", "en", "es", "pt"])
 def test_advice_failure_returns_200_with_template_not_502(live_client, monkeypatch, language):
-    """**刻意的行为变更**：建议这一步失败不再让整次评估失败。
+    """**A deliberate behaviour change**: a failure in the advice step no longer fails the
+    whole assessment.
 
-    评分是本地算出来的，也是这个服务真正值钱的部分。因为一段自然语言拿不到
-    就把用户已经得到的结果换成 502，是很差的交换。
+    The scores are computed locally, and they are the genuinely valuable part of this
+    service. Trading a result the user already has for a 502, just because one paragraph of
+    natural language could not be fetched, is a very bad exchange.
     """
     from app.deepseek_client import DeepSeekClient, DeepSeekError, fallback_advice
 
     async def boom(*args, **kwargs):
-        raise DeepSeekError("上游炸了")
+        raise DeepSeekError("upstream blew up")
 
     monkeypatch.setattr(DeepSeekClient, "chat_json", boom)
     resp = live_client.post("/api/assess", json=form(language=language))
@@ -126,10 +129,10 @@ def test_advice_failure_returns_200_with_template_not_502(live_client, monkeypat
     assert resp.status_code == 200
     body = resp.json()
     assert body["advice_source"] == "template"
-    # 分数照常返回，且确实是算出来的
+    # The scores still come back, and they really were computed
     assert body["dengue"]["score"] > 0
     assert body["explanations"]["dengue"]
-    # 文案就是那份共享模板，没有第二套文本
+    # The copy is that one shared template; there is no second set of text
     expected = fallback_advice(language, tier_of(body))
     assert body["advice"] == expected["advice"]
     assert body["summary"] == expected["summary"]
@@ -151,7 +154,7 @@ def test_clean_llm_advice_is_reported_as_llm(live_client, monkeypatch):
 
 
 def test_violating_advice_is_retried_once_then_accepted(live_client, monkeypatch):
-    """第一次带剂量，第二次干净：应当采用第二次的结果，并标记为 llm。"""
+    """First reply carries a dosage, second is clean: the second is used and marked llm."""
     from app.deepseek_client import DeepSeekClient, fallback_advice
 
     calls: list[str] = []
@@ -176,7 +179,7 @@ def test_violating_advice_is_retried_once_then_accepted(live_client, monkeypatch
     body = live_client.post("/api/assess", json=form()).json()
 
     assert len(calls) == 2
-    # 第二次的提示词里必须带上违规说明，模型才知道要改什么
+    # The second prompt must carry the violation notice, or the model cannot know what to fix
     assert "[dosage]" in calls[1]
     assert "violated" in calls[1]
     assert body["advice_source"] == "llm"
@@ -205,7 +208,7 @@ def test_advice_violating_twice_falls_back_to_template(live_client, monkeypatch)
     monkeypatch.setattr(DeepSeekClient, "chat_json", fake_chat_json)
     body = live_client.post("/api/assess", json=form()).json()
 
-    assert len(calls) == 2  # 首次 + 一次重问，不再无限试
+    assert len(calls) == 2  # first call + one re-ask, not an unbounded retry loop
     assert body["advice_source"] == "template"
     assert "500 mg" not in " ".join(body["advice"]["medical"])
     assert "42%" not in body["summary"]
@@ -225,7 +228,7 @@ def test_structurally_broken_advice_falls_back(live_client, monkeypatch):
     assert body["advice_source"] == "template"
 
 
-# ================= 追问：工具环、来源与编造链接 =================
+# ================= Follow-up: tool loop, sources, fabricated links =================
 
 
 def test_mock_chat_without_a_location_calls_no_tool(client):
@@ -247,17 +250,17 @@ def test_mock_chat_with_a_location_returns_citable_sources(client, question, lan
     body = client.post("/api/chat", json=chat(question=question, language=language)).json()
 
     assert body["reply"].strip()
-    assert body["sources"], "提到地名就该有来源"
+    assert body["sources"], "a place name mentioned must come with a source"
     origins = {s["origin"] for s in body["sources"]}
-    assert origins == {"who", "search"}, "两层来源都要出现，并且各自标好出处"
+    assert origins == {"who", "search"}, "both layers must appear, each labelled with its origin"
     for source in body["sources"]:
         assert set(source) == {"title", "date", "url", "origin", "authority"}
         assert source["url"].startswith("http")
         assert source["authority"] in {"official", "other"}
         if source["origin"] == "who":
             assert source["url"].startswith(WHO_PREFIX)
-            assert source["authority"] == "official", "WHO 通报按定义就是官方来源"
-    # 回复里出现的每个链接都必须在 sources 里——这就是那条不变量
+            assert source["authority"] == "official", "a WHO notice is official by definition"
+    # Every link that appears in the reply must be in sources -- that is the invariant
     assert verify_chat_reply(body["reply"], language, [s["url"] for s in body["sources"]]) == []
 
 
@@ -267,14 +270,14 @@ def test_mock_chat_reply_cites_a_url_that_really_came_from_the_tool(client):
     ).json()
     urls = {s["url"] for s in body["sources"]}
     cited = [u for u in urls if u in body["reply"]]
-    assert cited, f"演示回复应当引用工具返回的某条链接：{body['reply']!r}"
+    assert cited, f"the demo reply should cite a link the tool returned: {body['reply']!r}"
 
 
 def test_language_names_in_the_prompt_are_not_mistaken_for_places(client):
-    """提示词里的「葡萄牙语」「西班牙语」不能被当成 Portugal / Spain。
+    """The "Portuguese" / "Spanish" inside the prompt must not be read as Portugal / Spain.
 
-    MOCK 判定只看用户原文，不看整段提示词——否则每个葡语用户都会莫名其妙
-    收到一份关于葡萄牙的旅行提示。
+    The MOCK decision looks only at the user's own text, not at the whole prompt -- otherwise
+    every Portuguese-speaking user would inexplicably receive a travel note about Portugal.
     """
     for language in ("pt", "es"):
         body = client.post(
@@ -295,10 +298,12 @@ def test_history_mentioning_a_place_still_triggers_the_tool(client):
 
 
 def test_fabricated_url_forces_the_localised_fallback(live_client, monkeypatch):
-    """模型编了一个 who.int 链接：两轮都编，就必须换成兜底句、清空 sources。
+    """The model invents a who.int link: if it does so in both rounds, the reply must be
+    swapped for the fallback sentence and sources must be emptied.
 
-    问题里刻意不提地名，走的是**函数工具**那条路（没有地点就不检索）。
-    检索那条路上的同一条不变量由 tests/test_search.py 单独守着。
+    The question deliberately names no place, so this takes the **function tool** path (no
+    location means no search). The same invariant on the search path is guarded separately
+    by tests/test_search.py.
     """
     from app.deepseek_client import DeepSeekClient
     from app.pipeline import _UNRELIABLE_REPLY
@@ -317,10 +322,10 @@ def test_fabricated_url_forces_the_localised_fallback(live_client, monkeypatch):
 
     assert resp.status_code == 200
     body = resp.json()
-    assert len(calls) == 2  # 首次 + 一次带违规说明的重问
+    assert len(calls) == 2  # first call + one re-ask carrying the violation notice
     assert body["reply"] == _UNRELIABLE_REPLY["en"]
     assert body["sources"] == []
-    assert body["search_count"] == 0  # 没有地点 = 没花过检索钱
+    assert body["search_count"] == 0  # no location = no money spent on search
     assert "who.int" not in body["reply"]
 
 
@@ -343,7 +348,7 @@ def test_retry_prompt_carries_the_violation_message(live_client, monkeypatch):
 
 
 def test_a_url_that_the_tool_did_return_is_accepted(live_client, monkeypatch):
-    """反方向：模型引用的是工具真的给过的链接，就该原样放行并列进 sources。"""
+    """The other direction: a link the tool really did return passes through into sources."""
     from app.deepseek_client import DeepSeekClient
 
     url = WHO_PREFIX + "2024-DON518"
@@ -421,12 +426,12 @@ def test_tool_executor_returns_the_lookup_payload(client):
     assert collected == [result]
 
 
-# ================= 客户端：tools 循环本身 =================
+# ================= Client: the tools loop itself =================
 
 
 @pytest.mark.anyio
 async def test_tool_loop_executes_calls_and_feeds_results_back(live_client, monkeypatch):
-    """两轮：先要求调用工具，拿到结果后给出最终回复。"""
+    """Two rounds: first a tool call is requested, then its result feeds the final reply."""
     from app.deepseek_client import DeepSeekClient
 
     sent: list[list[dict]] = []
@@ -467,7 +472,7 @@ async def test_tool_loop_executes_calls_and_feeds_results_back(live_client, monk
     assert executed == [("lookup_dengue_context", {"location": "Singapore"})]
     assert outcome["reply"] == "Singapore is highly endemic."
     assert outcome["tool_results"][0]["name"] == "lookup_dengue_context"
-    # 第二轮的上下文里必须带上 assistant 的 tool_calls 与 tool 结果消息
+    # The second round's context must carry the assistant tool_calls and the tool result
     roles = [m["role"] for m in sent[1]]
     assert roles == ["system", "user", "assistant", "tool"]
     assert "Singapore" in sent[1][-1]["content"]
@@ -475,7 +480,7 @@ async def test_tool_loop_executes_calls_and_feeds_results_back(live_client, monk
 
 @pytest.mark.anyio
 async def test_tool_loop_stops_after_max_rounds(live_client, monkeypatch):
-    """模型一直要求调用工具时，轮数用尽必须逼它作答，而不是死循环。"""
+    """Model keeps asking for tools: exhausting the rounds must force an answer, not a loop."""
     from app.deepseek_client import DeepSeekClient
 
     tool_call_message = {
@@ -511,7 +516,7 @@ async def test_tool_loop_stops_after_max_rounds(live_client, monkeypatch):
     assert len(rounds) == 2
     assert len(outcome["tool_results"]) == 2
     assert outcome["reply"].startswith("Based on what I found")
-    # 收尾那一次不再提供 tools，并明确要求「只用已有结果作答」
+    # The closing call offers no tools and explicitly asks for "answer with what you have"
     assert "Answer the user now" in final[0][-1]["content"]
 
 
@@ -548,7 +553,7 @@ async def test_tool_failure_becomes_data_not_a_crash(live_client, monkeypatch):
         "system", [{"role": "user", "content": "?"}], [], angry_executor
     )
     result = outcome["tool_results"][0]
-    assert result["arguments"] == {}  # 非法 JSON 参数按空参数处理
+    assert result["arguments"] == {}  # invalid JSON arguments are treated as empty arguments
     assert result["result"]["lookup_failed"] is True
     assert outcome["reply"] == "I could not look that up."
 

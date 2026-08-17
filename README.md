@@ -80,7 +80,7 @@ Web questionnaire  →  FastAPI  →  deterministic feature encoding (26 feature
 - **Five languages**: Simplified Chinese, Traditional Chinese, English, Spanish, Portuguese —
   chosen for equatorial dengue-endemic regions
 - **Two risk gauges plus a rule-based safety layer** (see below)
-- **44 tests**, including a hand-computed check of the coefficient dot product
+- **407 tests**, including a hand-computed check of the coefficient dot product and an eval harness of 26 scenarios
 
 Engineering details, API contract, and deployment steps: [`service/README.md`](service/README.md)
 

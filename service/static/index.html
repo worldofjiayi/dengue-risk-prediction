@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
-  <!-- 语言切换器（固定右上角，各视图共用） -->
+  <!-- Language switcher (fixed to the top right, shared by every view) -->
   <div id="lang-switcher" class="lang-switcher">
     <button id="lang-toggle" class="lang-toggle" type="button"
             aria-haspopup="listbox" aria-expanded="false" aria-label="选择语言">
@@ -29,7 +29,7 @@
 
   <main id="app">
 
-    <!-- ① Hero 视图 -->
+    <!-- ① Hero view -->
     <section id="view-hero" class="view hero-view">
       <div class="hero-orbs" aria-hidden="true">
         <span class="orb orb-a"></span>
@@ -41,7 +41,7 @@
         <h1 class="hero-title" id="hero-title">登革热<br />风险自测</h1>
         <p class="hero-subtitle" id="hero-subtitle">回答症状与病史问题，获得风险参考与防护建议</p>
 
-        <!-- 两条入口：出行前查目的地 / 已有症状做自测（两种意图，刻意不混在一起） -->
+        <!-- Two entry points: check a destination before travel / self-assess symptoms (two intents, deliberately kept apart) -->
         <div class="hero-actions">
           <button id="btn-destination" class="hero-cta" type="button">
             <span class="hero-cta-icon" aria-hidden="true">✈️</span>
@@ -62,7 +62,7 @@
         </div>
       </div>
 
-      <!-- 底部小字：免责声明 + 隐私说明 -->
+      <!-- Footer small print: disclaimer + privacy note -->
       <div class="hero-foot">
         <p class="hero-disclaimer" id="hero-disclaimer">本结果仅供参考，不构成医疗诊断。如有不适请及时就医。</p>
         <p class="hero-privacy">
@@ -72,7 +72,7 @@
       </div>
     </section>
 
-    <!-- ② Wizard 视图（分步问卷） -->
+    <!-- ② Wizard view (step-by-step questionnaire) -->
     <section id="view-wizard" class="view" hidden>
       <div class="shell">
         <header class="wizard-header">
@@ -87,13 +87,13 @@
           </div>
         </header>
 
-        <!-- 问诊模式切换：智能问诊（自适应） / 完整问卷 -->
+        <!-- Interview mode toggle: smart interview (adaptive) / full questionnaire -->
         <div id="mode-toggle" class="mode-toggle" role="group" aria-label="选择问诊方式">
           <button id="mode-adaptive" class="mode-btn" type="button" aria-pressed="true">智能问诊（推荐）</button>
           <button id="mode-classic" class="mode-btn" type="button" aria-pressed="false">完整问卷</button>
         </div>
 
-        <div id="wizard-panel" class="wizard-panel card"><!-- 步骤内容由 app.js 渲染 --></div>
+        <div id="wizard-panel" class="wizard-panel card"><!-- Step content is rendered by app.js --></div>
 
         <p id="wizard-hint" class="wizard-hint" role="alert" hidden></p>
 
@@ -104,7 +104,7 @@
       </div>
     </section>
 
-    <!-- ③ Loading 视图 -->
+    <!-- ③ Loading view -->
     <section id="view-loading" class="view" hidden>
       <div class="loading-wrap">
         <div class="pulse" aria-hidden="true">
@@ -118,7 +118,7 @@
       </div>
     </section>
 
-    <!-- ④ Result 视图 -->
+    <!-- ④ Result view -->
     <section id="view-result" class="view" hidden>
       <div class="shell result-shell">
         <header class="result-header">
@@ -126,7 +126,7 @@
           <p class="result-sub" id="result-sub">基于你提供的症状与病史生成</p>
         </header>
 
-        <!-- WHO 警示征象提示（规则判断，独立于模型评分） -->
+        <!-- WHO warning signs notice (rule-based, independent of the model score) -->
         <div id="warning-banner" class="warning-banner" role="alert" hidden>
           <span class="warning-icon" aria-hidden="true">⚠️</span>
           <div class="warning-body">
@@ -137,7 +137,7 @@
 
         <div class="card gauge-card">
           <div class="gauges">
-            <!-- 主仪表盘：登革热可能性（模型 A）——可展开查看贡献项 -->
+            <!-- Primary gauge: dengue likelihood (model A) -- expands to show the contributions -->
             <button class="gauge-wrap gauge-primary" id="gauge-dengue" type="button"
                     aria-expanded="false" aria-controls="explain-dengue">
               <svg class="gauge" viewBox="0 0 220 220" aria-hidden="true" focusable="false">
@@ -155,7 +155,7 @@
               </span>
             </button>
 
-            <!-- 次仪表盘：重症风险（模型 B2）——可展开查看贡献项 -->
+            <!-- Secondary gauge: severe-disease risk (model B2) -- expands to show the contributions -->
             <button class="gauge-wrap gauge-secondary" id="gauge-severe" type="button"
                     aria-expanded="false" aria-controls="explain-severe">
               <svg class="gauge" viewBox="0 0 220 220" aria-hidden="true" focusable="false">
@@ -174,11 +174,11 @@
             </button>
           </div>
 
-          <!-- 贡献项面板（内容由 app.js 渲染） -->
+          <!-- Contribution panels (content rendered by app.js) -->
           <div id="explain-dengue" class="explain-panel" hidden></div>
           <div id="explain-severe" class="explain-panel" hidden></div>
 
-          <!-- 第三项：病情加重风险（模型 B），横条展示 -->
+          <!-- Third metric: risk of worsening (model B), shown as a bar -->
           <div class="bar-metric" id="metric-worsening">
             <button class="bar-head" id="btn-explain-worsening" type="button"
                     aria-expanded="false" aria-controls="explain-worsening">
@@ -196,7 +196,7 @@
           <p id="epi-week-line" class="epi-week"></p>
         </div>
 
-        <!-- 流行病学暴露背景（规则判断，刻意不做成仪表盘） -->
+        <!-- Epidemiological exposure context (rule-based, deliberately not a gauge) -->
         <div id="exposure-chip" class="exposure-chip" hidden>
           <span class="exposure-mark" aria-hidden="true">📍</span>
           <div class="exposure-body">
@@ -209,7 +209,7 @@
           </div>
         </div>
 
-        <!-- 旅行背景：来自目的地查询，刻意标注「未参与评分」 -->
+        <!-- Travel context: comes from the destination lookup, deliberately labelled "not part of the score" -->
         <div id="travel-context" class="travel-card" hidden>
           <span class="travel-mark" aria-hidden="true">✈️</span>
           <div class="travel-body">
@@ -227,9 +227,9 @@
           <button id="btn-travel-offer" class="link-btn" type="button"></button>
         </p>
 
-        <div id="advice-cards" class="advice-grid"><!-- 建议卡片由 app.js 渲染 --></div>
+        <div id="advice-cards" class="advice-grid"><!-- Advice cards are rendered by app.js --></div>
 
-        <!-- AI 追问对话 -->
+        <!-- AI follow-up chat -->
         <section class="card chat-card" id="chat-card">
           <header class="chat-head">
             <span class="chat-icon" aria-hidden="true">💬</span>
@@ -267,7 +267,7 @@
       <div id="disclaimer-bar" class="disclaimer-bar">本结果仅供参考，不构成医疗诊断。如有不适请及时就医。</div>
     </section>
 
-    <!-- ⑤ Destination 视图（出行前查目的地；刻意不出任何风险评分） -->
+    <!-- ⑤ Destination view (check a destination before travel; deliberately shows no risk score) -->
     <section id="view-destination" class="view" hidden>
       <div class="shell dest-shell">
         <header class="dest-header">
@@ -308,7 +308,7 @@
           <button id="dest-retry" class="btn btn-secondary dest-retry" type="button">重试</button>
         </div>
 
-        <div class="dest-results" id="dest-results" hidden><!-- 结果由 app.js 渲染 --></div>
+        <div class="dest-results" id="dest-results" hidden><!-- Results are rendered by app.js --></div>
 
         <p class="dest-cross">
           <button id="btn-dest-to-symptoms" class="link-btn" type="button"></button>
@@ -319,7 +319,7 @@
 
   </main>
 
-  <!-- 错误浮层 -->
+  <!-- Error overlay -->
   <div id="error-overlay" class="overlay" hidden>
     <div class="overlay-backdrop" aria-hidden="true"></div>
     <div class="overlay-card card" role="alertdialog" aria-modal="true" aria-labelledby="error-title" aria-describedby="error-detail">
@@ -333,7 +333,7 @@
     </div>
   </div>
 
-  <!-- 隐私说明浮层 -->
+  <!-- Privacy note overlay -->
   <div id="privacy-overlay" class="overlay" hidden>
     <div class="overlay-backdrop" aria-hidden="true"></div>
     <div class="overlay-card card privacy-card" role="dialog" aria-modal="true"

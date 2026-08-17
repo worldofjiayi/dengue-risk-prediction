@@ -1,20 +1,25 @@
-"""评测数据统计：读取评估回流 JSONL，输出三个模型各自的评分分布与等级占比、
-流行病学暴露等级的分布（规则判断，与模型评分相互独立），以及**联网检索的花销**。
+"""Evaluation data statistics: read the assessment feedback JSONL and report the score
+distribution and level shares of each of the three models, the distribution of
+epidemiological exposure levels (a rule-based judgement, independent of the model
+scores), and **what web search costs**.
 
-回流文件里有两种记录（见 app/eval_log.py）：带 scores 的评估记录，
-带 search_count 的检索记录。两者分开统计——检索记录没有评分，评估记录不检索，
-把它们混进同一个分母只会得到没有意义的数字。
+The feedback file holds two kinds of record (see app/eval_log.py): assessment records
+carrying scores, and search records carrying search_count. The two are counted
+separately -- search records have no scores and assessment records do not search, so
+throwing them into a single denominator would only produce a meaningless number.
 
-用法（Windows）：
-    .venv\\Scripts\\python.exe scripts\\eval_stats.py                # 默认 data/assessments.jsonl
-    .venv\\Scripts\\python.exe scripts\\eval_stats.py 路径\\xx.jsonl  # 指定文件
-    .venv\\Scripts\\python.exe scripts\\eval_stats.py --json         # 机器可读 JSON（供导出）
+Usage (Windows):
+    .venv\\Scripts\\python.exe scripts\\eval_stats.py                 # default data/assessments.jsonl
+    .venv\\Scripts\\python.exe scripts\\eval_stats.py path\\xx.jsonl  # a specific file
+    .venv\\Scripts\\python.exe scripts\\eval_stats.py --json          # machine-readable JSON (export)
 
-每行一条记录，格式见 app/eval_log.py 的 build_record；坏行跳过并计数。
+One record per line, format per build_record in app/eval_log.py; bad lines are skipped
+and counted.
 
-注意：模型阈值尚未在本地人群校准（见项目 README「已知局限」），
-这份统计的用途正是为校准积累依据——重点看各模型评分的分布形态，
-而不是把等级占比当作真实患病率。
+Note: the model thresholds have not yet been calibrated on the local population (see
+"Known limitations" in the project README). The purpose of these statistics is precisely
+to accumulate evidence for that calibration -- look at the shape of each model's score
+distribution, rather than treating the level shares as a real prevalence.
 """
 
 import argparse
@@ -26,33 +31,34 @@ from pathlib import Path
 
 DEFAULT_PATH = Path(__file__).resolve().parent.parent / "data" / "assessments.jsonl"
 
-# 评分直方图：0-100 分按 10 分一档，共 10 档（100 分归入最后一档）
+# Score histogram: 0-100 in bands of 10, 10 bands in all (a score of 100 goes in the last)
 BUCKET_WIDTH = 10
 NUM_BUCKETS = 10
 
-# 结果字段 -> 中文显示名
+# Result field -> display name
 MODEL_FIELDS = {
-    "dengue": "登革热可能性 (模型A)",
-    "worsening": "病情加重风险 (模型B)",
-    "severe": "重症风险 (模型B2)",
+    "dengue": "Dengue likelihood (model A)",
+    "worsening": "Worsening risk (model B)",
+    "severe": "Severe risk (model B2)",
 }
 
 
 def is_assessment(record: dict) -> bool:
-    """评估记录：带 scores 对象。"""
+    """Assessment record: carries a scores object."""
     return isinstance(record.get("scores"), dict)
 
 
 def is_search(record: dict) -> bool:
-    """检索记录：带整数 search_count（bool 是 int 的子类，要挡掉）。"""
+    """Search record: carries an integer search_count (bool subclasses int, so block it)."""
     count = record.get("search_count")
     return isinstance(count, int) and not isinstance(count, bool)
 
 
 def load_records(path: Path) -> tuple[list[dict], int]:
-    """读取 JSONL，返回 (合法记录列表, 跳过的坏行数)。
+    """Read the JSONL and return (list of valid records, number of bad lines skipped).
 
-    坏行 = 非法 JSON、非对象、或两种记录都不像（既没有 scores 也没有 search_count）。
+    A bad line = invalid JSON, not an object, or looking like neither kind of record
+    (no scores and no search_count).
     """
     records: list[dict] = []
     skipped = 0
@@ -80,7 +86,7 @@ def _bucket_label(index: int) -> str:
 
 
 def _model_stats(records: list[dict], field: str) -> dict | None:
-    """单个模型的评分统计；该字段完全缺失时返回 None。"""
+    """Score statistics for one model; returns None when the field is missing entirely."""
     scores = [
         float(r["scores"][field]["score"])
         for r in records
@@ -115,11 +121,12 @@ def _model_stats(records: list[dict], field: str) -> dict | None:
 
 
 def _search_stats(records: list[dict]) -> dict:
-    """联网检索的花销统计。
+    """Cost statistics for web search.
 
-    分母是**所有可能检索的请求**（包括最终 search_count=0 的那些）：
-    只统计花了钱的那些，就永远算不出「多少比例的请求真的花了钱」，
-    而这正是「只在识别到地点时才检索」这条规则有没有生效的唯一证据。
+    The denominator is **every request that could have searched** (including those that
+    ended at search_count=0): counting only the ones that cost money would never let you
+    work out "what fraction of requests really cost anything", and that fraction is the
+    only evidence that the rule "search only when a location is recognised" is working.
     """
     counts = [int(r["search_count"]) for r in records]
     if not counts:
@@ -154,10 +161,11 @@ def _search_stats(records: list[dict]) -> dict:
 
 
 def compute_stats(all_records: list[dict]) -> dict:
-    """从记录列表计算统计信息（纯函数，便于测试）。
+    """Compute the statistics from a list of records (a pure function, easy to test).
 
-    评估记录与检索记录分开统计：total / models / languages 等只看评估记录，
-    search 块只看检索记录。混在一起的分母没有任何意义。
+    Assessment and search records are counted separately: total / models / languages and
+    the rest look only at assessment records, and the search block only at search
+    records. A denominator that mixes the two means nothing at all.
     """
     records = [r for r in all_records if is_assessment(r)]
     search_records = [r for r in all_records if is_search(r) and not is_assessment(r)]
@@ -168,9 +176,10 @@ def compute_stats(all_records: list[dict]) -> dict:
         if stats is not None:
             models[field] = stats
 
-    # 流行病学暴露等级分布（规则判断，非模型输出）。
-    # 只统计带该字段的记录：加入暴露问题之前的旧记录没有它，
-    # 把它们计成 unknown 会凭空造出一个不存在的档位。
+    # Distribution of epidemiological exposure levels (a rule-based judgement, not model
+    # output). Only records that carry the field are counted: older records from before
+    # the exposure questions were added do not have it, and counting them as unknown
+    # would conjure up a band that does not exist.
     exposure_levels = Counter(
         str(r["exposure_level"]) for r in records if "exposure_level" in r
     )
@@ -191,32 +200,35 @@ def compute_stats(all_records: list[dict]) -> dict:
 
 
 def _print_search(search: dict) -> None:
-    """联网检索花销：总次数、均值，以及零检索请求的占比。"""
+    """Web search cost: total calls, the mean, and the share of requests with no search."""
     if not search.get("n"):
         return
     n = search["n"]
     print()
-    print(f"联网检索花销（可能检索的请求 n={n}）：")
+    print(f"Web search cost (requests that could search, n={n}):")
     print(
-        f"  总检索次数 {search['total']}  均值 {search['mean']} 次/请求  "
-        f"单次最多 {search['max']} 次  零检索 {search['zero']} 次"
-        f"（{round(search['zero'] * 100.0 / n, 1)}%）"
+        f"  {search['total']} search(es) total  mean {search['mean']} per request  "
+        f"max {search['max']} in one request  {search['zero']} with no search"
+        f" ({round(search['zero'] * 100.0 / n, 1)}%)"
     )
     for kind, bucket in search.get("by_kind", {}).items():
-        print(f"  {kind:>12}  n={bucket['n']:<5} 合计 {bucket['total']:<5} 均值 {bucket['mean']}")
+        print(f"  {kind:>12}  n={bucket['n']:<5} total {bucket['total']:<5} mean {bucket['mean']}")
     statuses = "  ".join(f"{k}={v}" for k, v in search.get("statuses", {}).items())
     if statuses:
-        print(f"  状态分布：{statuses}")
+        print(f"  Status distribution: {statuses}")
 
 
 def print_report(stats: dict, skipped: int, path: Path) -> None:
-    """按人类可读格式打印统计报告。"""
+    """Print the statistics report in a human-readable format."""
     total = stats["total"]
     search = stats.get("search") or {}
-    print(f"评测数据文件：{path}")
-    print(f"记录总数：{total}（跳过坏行 {skipped} 条，其中 MOCK 记录 {stats['mock_count']} 条）")
+    print(f"Evaluation data file: {path}")
+    print(
+        f"Records: {total} ({skipped} malformed line(s) skipped, "
+        f"{stats['mock_count']} MOCK record(s))"
+    )
     if total == 0:
-        _print_search(search)  # 只有检索记录的文件也该看得到花销
+        _print_search(search)  # a file with only search records should still show its cost
         return
 
     for field, label in MODEL_FIELDS.items():
@@ -237,49 +249,52 @@ def print_report(stats: dict, skipped: int, path: Path) -> None:
             f"{lv}={info['count']}({info['percent']}%)"
             for lv, info in m["levels"].items()
         )
-        print(f"  等级占比：{levels}")
+        print(f"  Level shares: {levels}")
 
     exposure = stats.get("exposure_levels") or {}
     if exposure:
         n = sum(exposure.values())
         print()
-        print(f"流行病学暴露等级分布（规则判断，非模型输出；n={n}）：")
+        print(
+            f"Epidemiological exposure level distribution "
+            f"(rule-based, not model output; n={n}):"
+        )
         for level in ("low", "medium", "high"):
             count = exposure.get(level, 0)
             print(f"  {level:>6}  {count:>5}  ({round(count * 100.0 / n, 1)}%)")
-        for level, count in exposure.items():  # 兜底：出现意料之外的取值也要显示
+        for level, count in exposure.items():  # fallback: unexpected values must show too
             if level not in ("low", "medium", "high"):
                 print(f"  {level:>6}  {count:>5}")
 
     print()
-    print("语言分布：")
+    print("Language distribution:")
     for lang, count in stats["languages"].items():
         print(f"  {lang:>6}  {count:>5}")
     if stats["epi_weeks"]:
         weeks = "  ".join(f"W{w}={c}" for w, c in stats["epi_weeks"].items())
-        print(f"\n流行病学周分布：{weeks}")
+        print(f"\nEpidemiological week distribution: {weeks}")
 
     _print_search(search)
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="评估回流数据统计")
+    parser = argparse.ArgumentParser(description="Statistics over the evaluation log data")
     parser.add_argument(
         "path",
         nargs="?",
         default=str(DEFAULT_PATH),
-        help="JSONL 文件路径（默认 data/assessments.jsonl）",
+        help="path to the JSONL file (default data/assessments.jsonl)",
     )
     parser.add_argument(
         "--json",
         action="store_true",
-        help="输出机器可读 JSON（含 skipped 字段），便于导出到其他工具",
+        help="print machine-readable JSON (including the skipped field) for export to other tools",
     )
     args = parser.parse_args(argv)
 
     path = Path(args.path)
     if not path.is_file():
-        print(f"文件不存在：{path}", file=sys.stderr)
+        print(f"File does not exist: {path}", file=sys.stderr)
         return 1
 
     records, skipped = load_records(path)

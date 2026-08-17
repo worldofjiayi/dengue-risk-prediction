@@ -1,18 +1,26 @@
-"""构造 DeepSeek 各次调用的提示词。
+"""Build the prompts for each DeepSeek call.
 
-评估流程中的两次调用：
-  features —— 阅读用户的自由文本补充说明，识别其中描述了但没有勾选的症状。
-  advice   —— 根据三个模型的评分生成目标语言的登革热防护与就医建议。
-追问接口（POST /api/chat）：
-  chat     —— 就用户自己的评估结果做保守的健康科普问答，输出纯文本。
-              没有识别到地点时带一个函数工具（lookup_dengue_context），
-              由模型自己决定要不要查某地的登革热背景与 WHO 通报。
-  chat（带检索）—— 问题里出现了地点时改走联网检索：不再给函数工具，
-              而是把 intel 查到的背景**直接摆在提示词里**，让模型在
-              「本地表 + WHO 通报」的地基上再补最近三个月的检索结果。
-目的地接口（POST /api/destination）：
-  destination —— 行前查询：某地最近三个月的登革热情况，要求给日期、给来源、
-              查不到就直说。输出是几条短要点，由流水线拆成 recent_findings。
+The two calls in the assessment flow:
+  features -- read the user's free-text notes and identify symptoms they described but
+              did not tick.
+  advice   -- generate dengue protection and care-seeking advice in the target language
+              from the three model scores.
+The follow-up endpoint (POST /api/chat):
+  chat     -- conservative health-education Q&A about the user's own assessment result,
+              plain text output.
+              When no location was recognised, a function tool
+              (lookup_dengue_context) is attached and the model decides for itself
+              whether to look up a place's dengue background and WHO notices.
+  chat (with search) -- when a location appears in the question we switch to web
+              search: no function tool this time, instead the background intel found is
+              **placed directly in the prompt**, so the model can add the last three
+              months of search results on top of the "local table + WHO notices"
+              foundation.
+The destination endpoint (POST /api/destination):
+  destination -- a pre-travel lookup: the dengue situation somewhere over the last three
+              months, required to give dates and sources, and to say so plainly when it
+              finds nothing. The output is a few short bullet points, which the pipeline
+              splits into recent_findings.
 """
 
 from datetime import date, timedelta
@@ -28,7 +36,7 @@ from app.schemas import (
     ModelScore,
 )
 
-# ---------- 症状 / 合并症的中文标签（提示词内部使用） ----------
+# ---------- Chinese labels for symptoms / comorbidities (used inside the prompt) ----------
 
 SYMPTOM_LABELS: dict[str, str] = {
     "FEBRE": "发热",
@@ -67,7 +75,8 @@ ANSWER_LABELS = {"yes": "有", "no": "无", "unknown": "不知道"}
 LEVEL_LABELS = {"low": "低", "medium": "中", "high": "高"}
 SEX_LABELS = {"F": "女", "M": "男"}
 
-# 语言代码 -> 提示词中使用的语言名称（中英对照，便于模型准确理解）
+# Language code -> the language name used in the prompt (Chinese and English side by
+# side, so the model reads it unambiguously)
 LANGUAGE_NAMES = {
     "zh-CN": "简体中文（Simplified Chinese）",
     "zh-TW": "繁體中文（Traditional Chinese）",
@@ -78,7 +87,7 @@ LANGUAGE_NAMES = {
 
 
 def _format_form(form: FormInput) -> str:
-    """把问卷答案格式化为可读中文文本（不含备注）。"""
+    """Format the questionnaire answers as readable Chinese text (notes excluded)."""
     symptoms = "、".join(
         f"{SYMPTOM_LABELS[c]}={ANSWER_LABELS[form.symptoms[c]]}" for c in SYMPTOM_CODES
     )
@@ -101,7 +110,8 @@ def _format_form(form: FormInput) -> str:
 
 
 def build_feature_prompt(form: FormInput) -> tuple[str, str]:
-    """第一次调用：从自由文本里补充用户没勾选的症状。返回 (system, user)。"""
+    """First call: pick up symptoms from the free text that the user did not tick.
+    Returns (system, user)."""
     candidates = "、".join(
         f"{code}（{SYMPTOM_LABELS[code]}）"
         for code in SYMPTOM_CODES
@@ -139,10 +149,11 @@ def build_advice_prompt(
     warning_signs: list[str] | None = None,
     exposure: ExposureContext | None = None,
 ) -> tuple[str, str]:
-    """第二次调用：评分 -> 目标语言建议 JSON。返回 (system, user)。
+    """Second call: scores -> advice JSON in the target language. Returns (system, user).
 
-    exposure 是规则判断出的流行病学暴露背景（见 pipeline.evaluate_exposure），
-    与模型评分并列传给模型，用来调整 medical 的紧迫程度。
+    exposure is the rule-derived epidemiological exposure context (see
+    pipeline.evaluate_exposure). It is passed to the model alongside the model scores,
+    and is used to adjust how urgent the medical advice should be.
     """
     language_name = LANGUAGE_NAMES[form.language]
     system = (
@@ -221,16 +232,18 @@ def build_advice_prompt(
     return system, "\n".join(user_parts)
 
 
-# ---------- 追问对话（POST /api/chat） ----------
+# ---------- Follow-up chat (POST /api/chat) ----------
 
 _CHAT_ROLE_LABELS = {"user": "用户", "assistant": "助手"}
 
-# ---- 模型可自主调用的工具：地区登革热背景 + WHO 疾病暴发新闻 ----
+# ---- A tool the model may call on its own initiative: regional dengue background +
+# WHO Disease Outbreak News ----
 #
-# 描述里写清「什么时候该调用」，是因为这决定了工具有没有用；
-# 写清「只能用返回的数据作答、只能引用返回的链接」，是因为这决定了
-# 工具会不会变成幻觉的放大器。出口处还有 verifier.verify_chat_reply
-# 兜底核对链接——提示词是第一道，校验器是最后一道。
+# The description spells out "when to call this" because that decides whether the tool
+# is useful at all; it spells out "answer only from the data returned, cite only the
+# links returned" because that decides whether the tool turns into an amplifier for
+# hallucination. On the way out, verifier.verify_chat_reply cross-checks the links as a
+# backstop -- the prompt is the first line of defence, the verifier is the last.
 
 DENGUE_CONTEXT_TOOL: dict = {
     "type": "function",
@@ -266,7 +279,8 @@ DENGUE_CONTEXT_TOOL: dict = {
     },
 }
 
-# system prompt 里与工具相关的额外条款（编号接在 build_chat_prompt 的 1-8 之后）
+# Extra tool-related clauses for the system prompt (numbered on from the 1-8 in
+# build_chat_prompt)
 _CHAT_TOOL_RULES = (
     f"9. 你有一个工具 {INTEL_TOOL_NAME}(location)，可以查询某个国家/地区的登革热流行程度、"
     "传播季节，以及 WHO 疾病暴发新闻。用户提到「要去某地」「在某地」「某地危不危险」时，"
@@ -281,12 +295,12 @@ _CHAT_TOOL_RULES = (
 
 
 def build_chat_tools() -> list[dict]:
-    """本轮对话提供给模型的工具列表。"""
+    """The list of tools offered to the model for this round of conversation."""
     return [DENGUE_CONTEXT_TOOL]
 
 
 def _format_chat_context(req: ChatRequest) -> str:
-    """把前端回传的结果快照格式化成可读中文文本。"""
+    """Format the result snapshot echoed back by the front end as readable Chinese text."""
     ctx = req.context
     lines: list[str] = []
 
@@ -325,13 +339,16 @@ def _format_chat_context(req: ChatRequest) -> str:
 
 
 def build_chat_prompt(req: ChatRequest, with_tools: bool = True) -> tuple[str, str]:
-    """追问对话：结果上下文 + 历史 + 本轮问题 -> (system, user)，输出纯文本。
+    """Follow-up chat: result context + history + this round's question -> (system,
+    user), with plain text output.
 
-    历史消息折叠进 user 文本而不是拆成多条 message，有两个好处：
-    历史与本轮问题被统一标注为「数据」，提示注入更难生效；客户端也只需要
-    一个通用的 system/user 接口。
+    Folding the history into the user text rather than splitting it into several
+    messages has two benefits: the history and this round's question are both labelled
+    uniformly as "data", which makes prompt injection harder to land; and the client
+    only needs one generic system/user interface.
 
-    with_tools=True 时在 system 末尾追加工具使用条款（第 9-11 条）。
+    When with_tools=True, the tool-use clauses (items 9-11) are appended to the end of
+    the system prompt.
     """
     language_name = LANGUAGE_NAMES[req.language]
     system = (
@@ -375,25 +392,29 @@ def build_chat_prompt(req: ChatRequest, with_tools: bool = True) -> tuple[str, s
     return system, "\n".join(parts)
 
 
-# ---------- 联网检索（/api/destination 与「问题里有地点」的 /api/chat） ----------
+# ---------- Web search (/api/destination, and /api/chat when the question names a place) ----------
 
-# 检索窗口：最近三个月。写成具体日期而不是「最近三个月」四个字——
-# 模型对「今天是哪天」没有可靠概念，给它一个区间它才知道什么算旧闻。
+# Search window: the last three months. Written as concrete dates rather than the words
+# "the last three months" -- the model has no reliable notion of what today's date is,
+# and only an explicit interval tells it what counts as stale news.
 SEARCH_WINDOW_DAYS = 90
 
 
 def search_window(today: date | None = None) -> tuple[str, str]:
-    """返回 (起始日期, 今天) 的 ISO 字符串，供提示词写明检索时间窗。"""
+    """Return (start date, today) as ISO strings, so the prompt can state the search
+    time window explicitly."""
     end = today or date.today()
     return (end - timedelta(days=SEARCH_WINDOW_DAYS)).isoformat(), end.isoformat()
 
 
 def format_intel_baseline(result: dict) -> str:
-    """把 intel.lookup_dengue_context 的返回摆成提示词里的「已知事实」块。
+    """Lay out what intel.lookup_dengue_context returned as a "known facts" block in the
+    prompt.
 
-    这一层是免费且稳定的：先给模型这块地基，再让它去检索补充最近的情况。
-    通报链接原样列出，模型引用时才有东西可引——它自己拼一个 who.int 地址会被
-    出口校验拦下。
+    This layer is free and stable: give the model this foundation first, then let it
+    search for the recent situation on top of it. Notice links are listed verbatim so
+    that the model has something real to cite -- a who.int address it assembles itself
+    gets stopped by the output verifier.
     """
     lines = [
         f"- 规范地名：{result.get('location') or '未知'}"
@@ -417,8 +438,9 @@ def format_intel_baseline(result: dict) -> str:
     return "\n".join(lines)
 
 
-# 检索路径共用的纪律。三条是新的，其余与非检索路径一致：
-# 只说检索真的看到的东西、给日期、查不到就直说。
+# Discipline shared by every search path. Three clauses are new, the rest match the
+# non-search path: say only what the search actually turned up, give dates, and say so
+# plainly when nothing was found.
 _SEARCH_DISCIPLINE = (
     "S1. 你可以联网检索。**只依据检索结果与下面给出的已知事实作答**，"
     "不要凭记忆补充病例数、疫情事件或政策。\n"
@@ -436,10 +458,12 @@ def build_destination_prompt(
     intel_result: dict,
     today: date | None = None,
 ) -> tuple[str, str]:
-    """行前目的地查询：某地最近三个月的登革热情况。返回 (system, user)。
+    """Pre-travel destination lookup: the dengue situation somewhere over the last three
+    months. Returns (system, user).
 
-    要求输出「- 」开头的短要点，是因为调用方要把它们拆成 recent_findings 数组；
-    让模型直接吐 JSON 反而更容易出格式错误，而这段文字本身就是给人读的。
+    Short bullet points starting with "- " are required because the caller splits them
+    into the recent_findings array; asking the model for JSON directly is in fact more
+    prone to format errors, and this text is meant to be read by a human anyway.
     """
     language_name = LANGUAGE_NAMES[language]
     start, end = search_window(today)
@@ -475,11 +499,13 @@ def build_destination_prompt(
 def build_chat_search_prompt(
     req: ChatRequest, intel_result: dict, today: date | None = None
 ) -> tuple[str, str]:
-    """追问对话的**检索版**提示词。返回 (system, user)。
+    """The **search version** of the follow-up chat prompt. Returns (system, user).
 
-    与普通版共用同一段 system（第 1-8 条），只是把「工具使用条款」换成检索纪律，
-    并把 intel 的查询结果作为已知事实放进 user。模型这一轮没有函数工具可调——
-    地区背景已经查好摆在桌上了，它只需要补最近三个月的情况。
+    It shares the same system prompt as the ordinary version (clauses 1-8), only
+    swapping the "tool-use clauses" for the search discipline, and putting what intel
+    found into user as known facts. The model has no function tool to call this round --
+    the regional background has already been looked up and laid out on the table, and
+    all it needs to add is the last three months.
     """
     system, user = build_chat_prompt(req, with_tools=False)
     start, end = search_window(today)

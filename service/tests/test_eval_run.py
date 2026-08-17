@@ -1,12 +1,13 @@
-"""场景化评测运行器（scripts/eval_run.py）测试。
+"""Tests for the scenario-based evaluation runner (scripts/eval_run.py).
 
-元测试思路：harness 本身也是被测对象——
-  1. 随包的 scenarios.json 必须全绿（这就是回归门禁的基线）；
-  2. 故意失败的场景必须产生退出码 1、失败转储文件、以及带实际值的输出；
-  3. scores_match_scenario 必须能识破 z 值不一致；
-  4. --only 过滤与 --json 输出必须可用。
+Meta-testing idea: the harness itself is under test too --
+  1. the shipped scenarios.json must be all green (that is the regression gate baseline);
+  2. a deliberately failing scenario must produce exit code 1, a failure dump file, and
+     output carrying the actual value;
+  3. scores_match_scenario must be able to see through a mismatch in z;
+  4. the --only filter and the --json output must work.
 
-全部在 MOCK_MODE 下进程内运行，不发真实网络请求。
+Everything runs in-process under MOCK_MODE, with no real network requests.
 """
 
 import json
@@ -32,13 +33,13 @@ EXPOSURE_CODES = ("FEVER_CLUSTER", "CONFIRMED_CASE", "OUTBREAK_TRAVEL")
 
 @pytest.fixture(autouse=True)
 def _mock_mode(monkeypatch):
-    """runner 会直接改 os.environ；先用 monkeypatch 设一遍，让 teardown 能还原。"""
+    """Runner writes os.environ directly; monkeypatch sets it first so teardown restores it."""
     monkeypatch.setenv("MOCK_MODE", "true")
     monkeypatch.setenv("EVAL_LOG_PATH", "")
 
 
 def full_form(yes_symptoms=(), **overrides) -> dict:
-    """构造一份键齐全的问卷请求体。"""
+    """Build a questionnaire request body with every key present."""
     body = {
         "age": 25,
         "sex": "M",
@@ -58,32 +59,32 @@ def write_scenarios(tmp_path: Path, scenarios: list[dict]) -> Path:
     return path
 
 
-# ---------- 随包场景：回归门禁基线 ----------
+# ---------- Shipped scenarios: the regression gate baseline ----------
 
 
 def test_shipped_scenarios_all_pass(tmp_path, capsys):
-    """元测试：随包的 scenarios.json 必须全部通过（退出码 0，无失败转储）。"""
+    """Meta-test: the shipped scenarios.json must all pass (exit code 0, no failure dumps)."""
     failures = tmp_path / "failures"
     assert main(["--failures-dir", str(failures)]) == 0
 
     out = capsys.readouterr().out
     assert "passed" in out
     assert "failure library" not in out
-    # 全绿时失败目录存在但为空
+    # When all green the failures directory exists but is empty
     assert failures.is_dir()
     assert list(failures.glob("*.json")) == []
 
 
 def test_shipped_scenarios_file_is_valid_and_broad():
-    """场景文件本身合法，且覆盖面达到基线：三类端点、约 20-35 个场景。"""
+    """The scenario file is itself valid and broad enough: three endpoints, 20-35 scenarios."""
     scenarios = load_scenarios(DEFAULT_SCENARIOS)
     assert 20 <= len(scenarios) <= 35
     endpoints = {s.get("endpoint", "assess") for s in scenarios}
     assert endpoints == {"assess", "chat", "destination"}
-    # 五种语言都必须被 assess 场景覆盖
+    # All five languages must be covered by assess scenarios
     languages = {s["request"].get("language") for s in scenarios if s.get("endpoint") == "assess"}
     assert {"zh-CN", "zh-TW", "en", "es", "pt"} <= languages
-    # 输出保证必须被固化：来源白名单、来源出处标签、检索花销、advice_source
+    # Output guarantees are pinned: source allow-list, origin labels, search cost, advice_source
     check_types = {c["type"] for s in scenarios for c in s["checks"]}
     assert {
         "sources_urls_allowed",
@@ -94,11 +95,13 @@ def test_shipped_scenarios_file_is_valid_and_broad():
     } <= check_types
 
 
-# ---------- 故意失败：失败案例库的产生路径 ----------
+# ---------- Deliberate failure: how the failure library gets produced ----------
 
 
 def test_failing_scenario_exits_1_and_dumps_failure(tmp_path, capsys):
-    """失败场景：退出码 1，落盘转储含请求+响应+失败检查，输出带实际值。"""
+    """A failing scenario: exit code 1, a dump holding request + response + failed checks,
+    and output that carries the actual value.
+    """
     path = write_scenarios(
         tmp_path,
         [
@@ -118,7 +121,7 @@ def test_failing_scenario_exits_1_and_dumps_failure(tmp_path, capsys):
     assert main(["--scenarios", str(path), "--failures-dir", str(failures)]) == 1
 
     out = capsys.readouterr().out
-    # 输出必须包含实际值（healthy 问卷的 dengue 等级是 low）
+    # The output must contain the actual value (a healthy form scores dengue as low)
     assert "got 'low'" in out
     assert "passed 0/1" in out
 
@@ -135,7 +138,7 @@ def test_failing_scenario_exits_1_and_dumps_failure(tmp_path, capsys):
 
 
 def test_stale_failure_dumps_cleared_between_runs(tmp_path):
-    """每轮运行开始时清空上一轮的失败转储：目录只反映最新一轮。"""
+    """Each run clears the previous run's failure dumps: the directory shows only the latest."""
     failures = tmp_path / "failures"
     failures.mkdir()
     stale = failures / "stale-scenario.json"
@@ -161,7 +164,7 @@ def test_stale_failure_dumps_cleared_between_runs(tmp_path):
 
 
 def test_scores_match_scenario_detects_mismatch(tmp_path, capsys):
-    """症状不同的两份问卷 z 值必然不同：scores_match_scenario 必须报红。"""
+    """Different symptoms always mean different z values: scores_match_scenario must go red."""
     path = write_scenarios(
         tmp_path,
         [
@@ -174,7 +177,7 @@ def test_scores_match_scenario_detects_mismatch(tmp_path, capsys):
             {
                 "id": "mismatched-twin",
                 "endpoint": "assess",
-                "request": full_form(),  # 无发热，z 必然不同
+                "request": full_form(),  # no fever, so z is bound to differ
                 "checks": [
                     {"type": "status", "expect": 200},
                     {"type": "scores_match_scenario", "ref": "reference-febre"},
@@ -187,7 +190,7 @@ def test_scores_match_scenario_detects_mismatch(tmp_path, capsys):
 
     out = capsys.readouterr().out
     assert "scores_match_scenario" in out
-    assert "z" in out  # 差异明细里必须点名 z 值
+    assert "z" in out  # the difference detail must name the z value
     dump = json.loads(
         (failures / "mismatched-twin.json").read_text(encoding="utf-8")
     )
@@ -195,7 +198,7 @@ def test_scores_match_scenario_detects_mismatch(tmp_path, capsys):
 
 
 def test_scores_match_scenario_resolves_ref_outside_only_filter(tmp_path):
-    """--only 只选了对照场景时，被引用的基准场景仍能按需执行。"""
+    """When --only selects only the twin, the referenced baseline still runs on demand."""
     path = write_scenarios(
         tmp_path,
         [
@@ -225,7 +228,7 @@ def test_scores_match_scenario_resolves_ref_outside_only_filter(tmp_path):
     )
 
 
-# ---------- 新检查类型：sources_urls_allowed / advice_source ----------
+# ---------- New check types: sources_urls_allowed / advice_source ----------
 
 
 def chat_request(question: str, **overrides) -> dict:
@@ -240,7 +243,9 @@ def chat_request(question: str, **overrides) -> dict:
 
 
 def test_advice_source_check_detects_template_passed_off_as_llm(tmp_path, capsys):
-    """MOCK 下建议来自模板；场景断言 llm 就必须报红，且明细里点名实际值。"""
+    """Under MOCK the advice comes from a template; a scenario asserting llm must go red,
+    with the actual value named in the detail.
+    """
     path = write_scenarios(
         tmp_path,
         [
@@ -259,7 +264,7 @@ def test_advice_source_check_detects_template_passed_off_as_llm(tmp_path, capsys
 
 
 def test_sources_check_catches_unexpected_sources(tmp_path, capsys):
-    """提到新加坡就会触发工具，此时断言 max_sources=0 必须失败。"""
+    """Mentioning Singapore triggers the tool, so asserting max_sources=0 must fail."""
     path = write_scenarios(
         tmp_path,
         [
@@ -274,11 +279,11 @@ def test_sources_check_catches_unexpected_sources(tmp_path, capsys):
     assert main(["--scenarios", str(path), "--failures-dir", str(tmp_path / "f")]) == 1
     out = capsys.readouterr().out
     assert "expected at most 0 source(s)" in out
-    assert "who.int" in out  # 明细里带上实际链接
+    assert "who.int" in out  # the detail carries the actual link
 
 
 def test_sources_check_catches_a_missing_source(tmp_path, capsys):
-    """没提地点就不会有来源；断言 min_sources=1 必须失败。"""
+    """No place mentioned means no sources; asserting min_sources=1 must fail."""
     path = write_scenarios(
         tmp_path,
         [
@@ -294,7 +299,7 @@ def test_sources_check_catches_a_missing_source(tmp_path, capsys):
     assert "expected at least 1 source(s), got 0" in capsys.readouterr().out
 
 
-# ---------- --only 过滤 ----------
+# ---------- --only filter ----------
 
 
 def test_only_filters_to_named_scenarios(tmp_path, capsys):
@@ -328,7 +333,7 @@ def test_missing_scenarios_file_is_a_usage_error(tmp_path, capsys):
     assert "缺失" in capsys.readouterr().err
 
 
-# ---------- --json 输出 ----------
+# ---------- --json output ----------
 
 
 def test_json_output_parses_with_per_check_detail(tmp_path, capsys):
@@ -346,11 +351,11 @@ def test_json_output_parses_with_per_check_detail(tmp_path, capsys):
         for check in result["checks"]:
             assert set(check) == {"type", "ok", "detail"}
             assert check["ok"] is True
-            assert check["detail"]  # 每条检查都要有可读明细
+            assert check["detail"]  # every check must have a readable detail
 
 
 def test_json_output_reports_failure_detail(tmp_path, capsys):
-    """--json 模式下失败检查同样带实际值明细。"""
+    """In --json mode a failed check carries the actual-value detail as well."""
     path = write_scenarios(
         tmp_path,
         [
@@ -369,5 +374,5 @@ def test_json_output_reports_failure_detail(tmp_path, capsys):
     assert payload["failed"] == ["json-fail"]
     (check,) = payload["results"][0]["checks"]
     assert check["ok"] is False
-    assert "'low'" in check["detail"]  # 实际值
+    assert "'low'" in check["detail"]  # the actual value
     assert payload["failure_dumps"] == [str(failures / "json-fail.json")]

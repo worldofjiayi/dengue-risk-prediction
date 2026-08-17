@@ -1,18 +1,18 @@
 /* =========================================================
-   流行病感染风险自测 — 样式表
-   纯 CSS，零外部依赖，系统字体栈
+   Epidemic infection risk self-assessment -- stylesheet
+   Pure CSS, zero external dependencies, system font stack
    ========================================================= */
 
 /* ---------- Design Tokens ---------- */
 :root {
-  /* 品牌色 */
+  /* Brand colors */
   --teal-700: #0f766e;
   --teal-600: #0d9488;
   --indigo-600: #4f46e5;
   --brand-grad: linear-gradient(135deg, #0f766e 0%, #0d9488 38%, #4f46e5 100%);
   --hero-grad: linear-gradient(160deg, #0f766e 0%, #115e59 28%, #312e81 68%, #4f46e5 100%);
 
-  /* 中性色（浅色模式） */
+  /* Neutrals (light mode) */
   --bg: #f3f6fa;
   --surface: #ffffff;
   --surface-2: #f8fafc;
@@ -22,22 +22,22 @@
   --border: #e2e8f0;
   --border-strong: #cbd5e1;
 
-  /* 强调色 */
+  /* Accent colors */
   --accent: #0d9488;
   --accent-ink: #0f766e;
   --accent-soft: rgba(13, 148, 136, 0.09);
   --ring: rgba(13, 148, 136, 0.45);
 
-  /* 语义色 */
+  /* Semantic colors */
   --green: #10b981;
   --amber: #f59e0b;
   --red: #ef4444;
   --red-soft: rgba(239, 68, 68, 0.08);
 
-  /* 结果等级（默认中风险，JS 按 level 切换类覆盖） */
+  /* Result band (medium by default; JS swaps the level-* class to override) */
   --level-color: var(--amber);
 
-  /* 形状与阴影 */
+  /* Shape and shadow */
   --radius: 16px;
   --radius-lg: 24px;
   --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05), 0 4px 12px -4px rgba(15, 23, 42, 0.08);
@@ -80,7 +80,7 @@
   }
 }
 
-/* ---------- Reset & 基础 ---------- */
+/* ---------- Reset & base ---------- */
 *,
 *::before,
 *::after {
@@ -124,7 +124,7 @@ ol {
   border-radius: 6px;
 }
 
-/* ---------- 视图切换 ---------- */
+/* ---------- View switching ---------- */
 .view {
   animation: view-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
@@ -144,11 +144,11 @@ ol {
   width: 100%;
   max-width: 720px;
   margin: 0 auto;
-  /* 顶部留白避开固定定位的语言切换器 */
+  /* Top padding keeps clear of the fixed language switcher */
   padding: 68px 20px 48px;
 }
 
-/* ---------- 语言切换器 ---------- */
+/* ---------- Language switcher ---------- */
 .lang-switcher {
   position: fixed;
   top: calc(12px + env(safe-area-inset-top));
@@ -248,7 +248,7 @@ ol {
   font-weight: 700;
 }
 
-/* ---------- 通用卡片 ---------- */
+/* ---------- Generic card ---------- */
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -256,7 +256,7 @@ ol {
   box-shadow: var(--shadow-md);
 }
 
-/* ---------- 按钮 ---------- */
+/* ---------- Buttons ---------- */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -310,8 +310,9 @@ ol {
 /* =========================================================
    ① Hero
    ========================================================= */
-/* 纵向 flex：主内容用 auto 外边距居中，底部小字始终跟在其后，
-   不再用绝对定位，短屏上也不会与 CTA 叠在一起。 */
+/* Vertical flex: auto margins centre the main content, and the footer small print
+   always follows it. No absolute positioning any more, so on short screens it can
+   no longer end up stacked on top of the CTA. */
 .hero-view {
   position: relative;
   min-height: 100dvh;
@@ -323,7 +324,7 @@ ol {
   color: #fff;
 }
 
-/* 光晕自己负责裁切：hero-view 不设 overflow，内容超高时页面还能滚 */
+/* The orbs clip themselves: hero-view sets no overflow, so tall content can still scroll */
 .hero-orbs {
   position: absolute;
   inset: 0;
@@ -379,7 +380,7 @@ ol {
   z-index: 1;
   width: 100%;
   max-width: 640px;
-  margin: auto 0; /* 在剩余空间里垂直居中 */
+  margin: auto 0; /* Centred vertically in the leftover space */
   text-align: center;
 }
 
@@ -422,7 +423,7 @@ ol {
   color: rgba(255, 255, 255, 0.86);
 }
 
-/* --- Hero 的两条入口：出行前查目的地 / 已有症状做自测 --- */
+/* --- Hero's two entry points: check a destination before travel / self-assess symptoms --- */
 .hero-actions {
   display: flex;
   flex-direction: column;
@@ -517,7 +518,7 @@ ol {
   transform: translateX(5px);
 }
 
-/* --- Hero 底部小字：免责声明 + 隐私 --- */
+/* --- Hero footer small print: disclaimer + privacy --- */
 .hero-foot {
   position: relative;
   z-index: 1;
@@ -550,8 +551,8 @@ ol {
   color: rgba(255, 255, 255, 0.5);
 }
 
-/* 文字型链接按钮（隐私说明等）：视觉上是小字里的一个链接，
-   触控面积用 ::after 撑到 44px，不影响行高。 */
+/* Text link button (privacy note and the like): visually just a link inside the small
+   print; ::after stretches the touch target to 44px without affecting line height. */
 .link-btn {
   position: relative;
   padding: 2px 3px;
@@ -651,7 +652,7 @@ ol {
   font-weight: 700;
 }
 
-/* --- 步骤面板 --- */
+/* --- Step panel --- */
 .wizard-panel {
   padding: 26px 22px 30px;
   overflow: hidden;
@@ -720,7 +721,7 @@ ol {
   color: var(--text-3);
 }
 
-/* --- 题目区块 --- */
+/* --- Question block --- */
 .field {
   margin-top: 26px;
 }
@@ -753,7 +754,7 @@ ol {
   color: var(--text-3);
 }
 
-/* --- 选项卡片 --- */
+/* --- Option cards --- */
 .opt-grid {
   display: grid;
   grid-template-columns: 1fr;
@@ -840,7 +841,7 @@ ol {
   color: var(--accent-ink);
 }
 
-/* 对勾 */
+/* Check mark */
 .opt-check {
   flex: 0 0 auto;
   margin-left: auto;
@@ -884,7 +885,7 @@ ol {
   }
 }
 
-/* --- 补充说明 textarea --- */
+/* --- Additional-notes textarea --- */
 .notes-area {
   width: 100%;
   min-height: 150px;
@@ -923,7 +924,7 @@ ol {
   font-weight: 600;
 }
 
-/* --- 提示与导航 --- */
+/* --- Hints and navigation --- */
 .wizard-hint {
   margin-top: 14px;
   padding: 10px 16px;
@@ -1056,7 +1057,7 @@ ol {
    ④ Result
    ========================================================= */
 .result-shell {
-  padding-bottom: 110px; /* 给底部免责声明条留空间 */
+  padding-bottom: 110px; /* Room for the fixed disclaimer bar */
 }
 
 .result-header {
@@ -1074,7 +1075,7 @@ ol {
   color: var(--text-3);
 }
 
-/* 等级配色（JS 在 #view-result 上切换 level-* 类） */
+/* Band colors (JS swaps the level-* class on #view-result) */
 #view-result.level-low {
   --level-color: var(--green);
   --level-soft: rgba(16, 185, 129, 0.13);
@@ -1104,7 +1105,7 @@ ol {
   text-align: center;
 }
 
-/* 仪表盘本身是一个按钮：点击展开「为什么是这个分数」面板 */
+/* The gauge itself is a button: clicking it expands the "why this score" panel */
 .gauge-wrap {
   position: relative;
   display: block;
@@ -1153,7 +1154,7 @@ ol {
 }
 
 .gauge-center {
-  /* 只覆盖正方形的 SVG 区域，下方留给「为什么」提示 */
+  /* Covers only the square SVG area; the space below is left for the "why" hint */
   position: absolute;
   top: 0;
   left: 0;
@@ -1204,7 +1205,7 @@ ol {
   color: var(--text-3);
 }
 
-/* 建议卡片 */
+/* Advice cards */
 .advice-grid {
   display: grid;
   grid-template-columns: 1fr;
@@ -1290,7 +1291,7 @@ ol {
   min-width: 120px;
 }
 
-/* 底部固定免责声明条 */
+/* Disclaimer bar fixed to the bottom */
 .disclaimer-bar {
   position: fixed;
   left: 0;
@@ -1308,7 +1309,7 @@ ol {
 }
 
 /* =========================================================
-   错误浮层
+   Error overlay
    ========================================================= */
 .overlay {
   position: fixed;
@@ -1383,10 +1384,10 @@ ol {
 }
 
 /* =========================================================
-   登革热问卷 —— 三态题、滑块、双仪表盘
+   Dengue questionnaire -- tri-state questions, sliders, dual gauges
    ========================================================= */
 
-/* ---------- 步骤过渡与提示 ---------- */
+/* ---------- Step transitions and hints ---------- */
 .step.slide-in-right { animation: slide-in-right 0.32s cubic-bezier(0.22, 1, 0.36, 1) both; }
 .step.slide-in-left  { animation: slide-in-left  0.32s cubic-bezier(0.22, 1, 0.36, 1) both; }
 
@@ -1426,7 +1427,7 @@ ol {
 .bulk-btn:hover { border-color: var(--accent); color: var(--accent-ink); background: var(--accent-soft); }
 .bulk-btn:active { transform: scale(0.97); }
 
-/* ---------- 三态问题行 ---------- */
+/* ---------- Tri-state question rows ---------- */
 .q-list {
   margin-top: 18px;
   border: 1px solid var(--border);
@@ -1505,7 +1506,7 @@ ol {
   color: var(--text-2);
 }
 
-/* ---------- 基本信息字段 ---------- */
+/* ---------- Basic information fields ---------- */
 .field-block { margin-top: 22px; }
 .field-block:first-of-type { margin-top: 18px; }
 
@@ -1608,7 +1609,7 @@ ol {
 .notes-input:focus { border-color: var(--accent); outline: none; }
 .notes-input:focus-visible { outline: 3px solid var(--ring); outline-offset: 2px; }
 
-/* ---------- 结果页：双仪表盘 ---------- */
+/* ---------- Result page: dual gauges ---------- */
 .gauges {
   display: flex;
   flex-wrap: wrap;
@@ -1628,7 +1629,7 @@ ol {
 .gauge-secondary .gauge-unit  { font-size: 0.7rem; }
 .gauge-secondary .level-badge { font-size: 0.76rem; padding: 3px 12px; margin-top: 6px; }
 
-/* ---------- 结果页：加重风险横条 ---------- */
+/* ---------- Result page: worsening-risk bar ---------- */
 .bar-metric {
   margin: 26px auto 0;
   max-width: 480px;
@@ -1638,7 +1639,7 @@ ol {
 .bar-metric.level-medium { --level-color: var(--amber); --level-soft: rgba(245, 158, 11, 0.12); }
 .bar-metric.level-high   { --level-color: var(--red);   --level-soft: rgba(239, 68, 68, 0.12); }
 
-/* 横条标题行同样是按钮：展开加重风险的贡献项 */
+/* The bar's heading row is a button too: expands the worsening-risk contributions */
 .bar-head {
   display: flex;
   align-items: center;
@@ -1691,7 +1692,7 @@ ol {
   transition: width 0.9s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-/* ---------- 结果页：模型说明 ---------- */
+/* ---------- Result page: model note ---------- */
 .model-note {
   margin: 16px auto 0;
   max-width: 480px;
@@ -1711,7 +1712,7 @@ ol {
   letter-spacing: 0.04em;
 }
 
-/* ---------- 窄屏优化 ---------- */
+/* ---------- Narrow-screen tuning ---------- */
 @media (max-width: 420px) {
   .q-row { flex-direction: column; align-items: stretch; gap: 10px; }
   .q-opts { justify-content: stretch; }
@@ -1721,7 +1722,7 @@ ol {
   .gauge-secondary { width: min(170px, 56vw); }
 }
 
-/* ---------- 深色模式补充 ---------- */
+/* ---------- Dark mode additions ---------- */
 @media (prefers-color-scheme: dark) {
   .q-list { background: var(--surface); }
   .q-opt { background: rgba(255, 255, 255, 0.04); }
@@ -1741,7 +1742,7 @@ ol {
   .bar-metric.level-high   { --level-ink: #f87171; }
 }
 
-/* ---------- WHO 警示征象横幅 ---------- */
+/* ---------- WHO warning signs banner ---------- */
 .warning-banner {
   display: flex;
   align-items: flex-start;
@@ -1779,7 +1780,7 @@ ol {
 }
 
 /* =========================================================
-   仅供屏幕阅读器
+   Screen readers only
    ========================================================= */
 .sr-only {
   position: absolute;
@@ -1794,7 +1795,7 @@ ol {
 }
 
 /* =========================================================
-   「为什么是这个分数」——模型贡献项面板
+   "Why this score" -- model contribution panel
    ========================================================= */
 .gauge-why {
   display: inline-flex;
@@ -1936,7 +1937,7 @@ ol {
 }
 
 /* =========================================================
-   流行病学暴露背景（刻意不做成仪表盘：方角 + 虚线边框）
+   Epidemiological exposure context (deliberately not a gauge: square corners + dashed border)
    ========================================================= */
 .exposure-chip {
   display: flex;
@@ -2009,7 +2010,7 @@ ol {
 }
 
 /* =========================================================
-   AI 追问对话
+   AI follow-up chat
    ========================================================= */
 .chat-card {
   margin-top: 18px;
@@ -2235,7 +2236,7 @@ ol {
 .chat-foot .link-btn:hover { color: var(--accent-ink); }
 
 /* =========================================================
-   隐私说明浮层
+   Privacy note overlay
    ========================================================= */
 .privacy-card {
   max-width: 520px;
@@ -2294,7 +2295,7 @@ ol {
 .privacy-card .overlay-actions { margin-top: 20px; }
 
 /* =========================================================
-   新组件的深色模式补充
+   Dark mode additions for the new components
    ========================================================= */
 @media (prefers-color-scheme: dark) {
   .gauge-why { background: rgba(255, 255, 255, 0.05); }
@@ -2310,7 +2311,7 @@ ol {
   .chat-input { background: rgba(255, 255, 255, 0.04); }
 }
 
-/* ---------- 新组件的窄屏优化 ---------- */
+/* ---------- Narrow-screen tuning for the new components ---------- */
 @media (max-width: 420px) {
   .ex-row { grid-template-columns: minmax(0, 1fr) 72px 20px; gap: 8px; }
   .chat-card { padding: 18px 14px 14px; }
@@ -2319,10 +2320,10 @@ ol {
 }
 
 /* =========================================================
-   智能问诊（自适应模式）
+   Smart interview (adaptive mode)
    ========================================================= */
 
-/* ---------- 模式切换 ---------- */
+/* ---------- Mode toggle ---------- */
 .mode-toggle {
   display: flex;
   gap: 4px;
@@ -2359,7 +2360,7 @@ ol {
   font-weight: 700;
 }
 
-/* ---------- 区间收窄可视化：三条轨道 ---------- */
+/* ---------- Interval-narrowing visualisation: three tracks ---------- */
 .nr-wrap {
   margin-top: 20px;
   text-align: left;
@@ -2461,7 +2462,7 @@ ol {
   transition: left 0.55s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.3s ease;
 }
 
-/* ---------- 单题卡片 ---------- */
+/* ---------- Single-question card ---------- */
 .aq-card {
   margin-top: 18px;
   padding: 22px 18px 18px;
@@ -2565,7 +2566,7 @@ ol {
 .aq-loading .dot:nth-child(2) { animation-delay: 0.15s; }
 .aq-loading .dot:nth-child(3) { animation-delay: 0.3s; }
 
-/* ---------- 停止原因与补充链接 ---------- */
+/* ---------- Stop reason and follow-up link ---------- */
 .stop-line {
   display: flex;
   align-items: flex-start;
@@ -2598,7 +2599,7 @@ ol {
 
 .aq-more .link-btn:hover { color: var(--accent-ink); }
 
-/* ---------- 智能问诊：深色模式 ---------- */
+/* ---------- Smart interview: dark mode ---------- */
 @media (prefers-color-scheme: dark) {
   .aq-card { background: rgba(255, 255, 255, 0.03); }
   .aq-opt { background: rgba(255, 255, 255, 0.04); }
@@ -2611,7 +2612,7 @@ ol {
   .nr-track.lv-high   { --nr-ink: #f87171; }
 }
 
-/* ---------- 智能问诊：窄屏 ---------- */
+/* ---------- Smart interview: narrow screen ---------- */
 @media (max-width: 420px) {
   .mode-btn { font-size: 0.78rem; }
   .aq-opts { gap: 8px; }
@@ -2621,18 +2622,20 @@ ol {
 }
 
 /* =========================================================
-   ⑤ 目的地查询（第二条用户路径）
+   ⑤ Destination lookup (the second user path)
 
-   这一页**刻意没有任何评分**：没有仪表盘、没有 0–100 的数字。
-   国家级参考表撑不起一个分数，所以流行程度只以定性徽章呈现。
-   三层信息的可信度不同，视觉上必须能一眼分辨：
-     · 地区背景 —— 实线卡片、实心标签（稳定参考）
-     · 世卫通报 —— 实线卡片、实心标签（官方，但必须带日期）
-     · 近期报道 —— 虚线卡片、虚线标签（联网检索，最不确定）
-   虚线 = 不确定，这个语汇与 .exposure-chip 一致。
+   This page **deliberately carries no score at all**: no gauge, no 0–100 number.
+   A country-level reference table cannot carry a score, so endemicity is shown
+   only as a qualitative badge.
+   The three layers of information are not equally trustworthy, and that has to be
+   visible at a glance:
+     · Regional context -- solid card, solid tag (stable reference)
+     · WHO notices -- solid card, solid tag (official, but must carry a date)
+     · Recent reports -- dashed card, dashed tag (web search, least certain)
+   Dashed = uncertain; this vocabulary matches .exposure-chip.
    ========================================================= */
 .dest-shell {
-  padding-bottom: 110px; /* 给底部免责声明条留空间 */
+  padding-bottom: 110px; /* Room for the fixed disclaimer bar */
 }
 
 .dest-header {
@@ -2682,7 +2685,7 @@ ol {
   color: var(--text-2);
 }
 
-/* ---------- 输入区 ---------- */
+/* ---------- Input area ---------- */
 .dest-form {
   padding: 20px 18px 18px;
 }
@@ -2775,7 +2778,7 @@ ol {
 .dest-chip:focus-visible { outline: 3px solid var(--ring); outline-offset: 2px; }
 .dest-chip:disabled { opacity: 0.5; cursor: not-allowed; }
 
-/* ---------- 加载与错误（都在视图内联，不用全局浮层） ---------- */
+/* ---------- Loading and error (both inline in the view, no global overlay) ---------- */
 .dest-loading {
   margin-top: 26px;
   text-align: center;
@@ -2823,9 +2826,9 @@ ol {
   font-size: 0.88rem;
 }
 
-/* ---------- 结果区 ---------- */
+/* ---------- Results area ---------- */
 .dest-results {
-  /* 建议卡片的项目符号跟随品牌色，而不是评分等级色 */
+  /* Advice-card bullets follow the brand color, not the risk-band color */
   --level-color: var(--accent);
   margin-top: 22px;
 }
@@ -2839,7 +2842,7 @@ ol {
 
 .dest-result-title:focus-visible { outline: none; }
 
-/* 「这里没有评分，而且是刻意的」——把这句话放在最显眼的位置 */
+/* "There is no score here, and that is deliberate" -- put this line where it is most visible */
 .dest-noscore {
   margin-top: 10px;
   padding: 12px 14px;
@@ -2862,7 +2865,7 @@ ol {
   overflow-wrap: anywhere;
 }
 
-/* ---------- 三层信息 ---------- */
+/* ---------- Three information layers ---------- */
 .dest-layer {
   margin-top: 16px;
   padding: 18px 17px 16px;
@@ -2872,7 +2875,7 @@ ol {
   box-shadow: var(--shadow-sm);
 }
 
-/* 近期报道：虚线 + 方角 + 无阴影，视觉上明确「最不确定」 */
+/* Recent reports: dashed + square corners + no shadow, visually marking "least certain" */
 .dest-layer.layer-recent {
   border: 1.5px dashed var(--border-strong);
   border-radius: 10px;
@@ -2951,7 +2954,7 @@ ol {
   color: var(--text-3);
 }
 
-/* 定性徽章：只有等级，没有数字 */
+/* Qualitative badge: level only, no number */
 .dest-endemicity {
   display: flex;
   flex-wrap: wrap;
@@ -2997,7 +3000,7 @@ ol {
   color: var(--text-3);
 }
 
-/* 世卫通报：日期是这一层的重点，必须每条都露出来 */
+/* WHO notices: the date is the point of this layer, so every item must show one */
 .dest-notices {
   display: flex;
   flex-direction: column;
@@ -3027,7 +3030,7 @@ ol {
   border: 1px solid var(--border);
 }
 
-/* 链接是弹性子项本身：整行宽 × ≥44px 的触控面积 */
+/* The link is the flex child itself: full-row width × ≥44px touch target */
 .notice-title {
   flex: 1 1 12rem;
   min-width: 0;
@@ -3064,7 +3067,7 @@ ol {
   border: 1.5px solid var(--text-3);
 }
 
-/* search_status：如实说明检索降级或关闭 */
+/* search_status: states plainly when search degraded or was turned off */
 .dest-status {
   margin-top: 12px;
   padding: 10px 12px;
@@ -3076,7 +3079,7 @@ ol {
   color: var(--text-3);
 }
 
-/* ---------- 来源链接 ---------- */
+/* ---------- Source links ---------- */
 .dest-sources {
   margin-top: 16px;
   padding: 18px 17px 14px;
@@ -3132,7 +3135,8 @@ ol {
   min-height: 44px;
 }
 
-/* 链接是弹性子项本身，纵向内边距把触控面积撑到 44px，行与行之间不重叠 */
+/* The link is the flex child itself; vertical padding stretches the touch target to
+   44px, and rows still do not overlap */
 .src-link,
 .src-plain {
   flex: 1 1 12rem;
@@ -3159,9 +3163,10 @@ ol {
   color: var(--text-3);
 }
 
-/* 政府 / 国际卫生机构来源。检索那一组里，卫生部通报和新闻转载是并排返回的，
-   这个标记让读者一眼看出哪条更可核对。沿用页面既有的「实线=更硬」的约定，
-   与虚线的「网络检索」分组标签形成对照。 */
+/* Government / international health agency source. Within the search group, health
+   ministry notices and news reprints come back side by side; this marker lets the reader
+   see at a glance which one is easier to verify. It reuses the page's existing
+   "solid = harder evidence" convention, in contrast to the dashed "web search" group tag. */
 .src-official {
   flex: 0 0 auto;
   padding: 1px 7px;
@@ -3191,7 +3196,7 @@ ol {
 
 .dest-cross .link-btn { color: var(--accent-ink); }
 
-/* ---------- 对话气泡里的来源 ---------- */
+/* ---------- Sources inside chat bubbles ---------- */
 .msg-sources {
   margin-top: 10px;
   padding-top: 8px;
@@ -3207,8 +3212,8 @@ ol {
 .msg-sources .src-tag { font-size: 0.64rem; margin-bottom: 2px; }
 
 /* =========================================================
-   结果页的旅行背景卡片
-   （与暴露背景同一套语汇：虚线方角 = 不是模型评分）
+   Travel context card on the result page
+   (same vocabulary as the exposure context: dashed square corners = not a model score)
    ========================================================= */
 .travel-card {
   display: flex;
@@ -3283,7 +3288,7 @@ ol {
 
 .travel-offer .link-btn { color: var(--accent-ink); }
 
-/* ---------- 目的地：深色模式 ---------- */
+/* ---------- Destination: dark mode ---------- */
 @media (prefers-color-scheme: dark) {
   .hero-cta { background: rgba(255, 255, 255, 0.94); }
   .dest-input { background: rgba(255, 255, 255, 0.04); }
@@ -3302,7 +3307,7 @@ ol {
   .endem-unknown  { --endem-ink: var(--text-3); --endem-soft: rgba(255, 255, 255, 0.05); }
 }
 
-/* ---------- 目的地：窄屏 ---------- */
+/* ---------- Destination: narrow screen ---------- */
 @media (max-width: 420px) {
   .dest-input-row { flex-direction: column; }
   .dest-submit { width: 100%; min-height: 48px; }
@@ -3314,7 +3319,7 @@ ol {
 }
 
 /* =========================================================
-   动效偏好
+   Motion preferences
    ========================================================= */
 @media (prefers-reduced-motion: reduce) {
   *,

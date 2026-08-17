@@ -1,57 +1,73 @@
-"""登革热风险模型推理。
+"""Dengue risk model inference.
 
-== 模型来源 ==
-巴西 SINAN 法定传染病通报系统 2023–2025 年 944.99 万条登革热通报数据训练的
-三个逻辑回归模型，系数存放在 app/model/dengue_models.json：
+== Where the model comes from ==
+Three logistic regression models trained on 9.4499 million dengue notification
+records from Brazil's SINAN notifiable-disease reporting system, 2023–2025.
+The coefficients live in app/model/dengue_models.json:
 
-  A  —— 是否登革热（确诊 vs 不确定）        AUC 0.686
-  B  —— 是否加重（警示+重症 vs 普通）        AUC 0.722
-  B2 —— 是否重症（重症 vs 其他登革热）       AUC 0.810（最强）
+  A  -- dengue or not (confirmed vs inconclusive)        AUC 0.686
+  B  -- worsening or not (warning + severe vs ordinary)  AUC 0.722
+  B2 -- severe or not (severe vs other dengue)           AUC 0.810 (the strongest)
 
-== 三个必须知道的限制 ==
+== Three limitations you must know about ==
 
-1. **无截距**。训练脚本只导出了 coef_，没有导出 intercept_，因此 z 是不含常数项的
-   线性预测值。经 sigmoid 得到的 0-100 分只能作为**相对风险排序**使用。
+1. **No intercept.** The training script only exported coef_, not intercept_, so z
+   is a linear predictor without a constant term. The 0-100 score derived from it
+   can only be used as a **relative risk ranking**.
 
-2. **训练做了下采样 + class_weight="balanced"**。即便有截距，其对应的也是重采样后的
-   人为患病率，而非真实人群患病率。所以本模块的输出**不是感染概率**，
-   任何面向用户的文案都不得把它表述为百分比概率。
+2. **Training used downsampling + class_weight="balanced".** Even if there were an
+   intercept, it would correspond to the artificial post-resampling prevalence, not
+   the true population prevalence. So the output of this module is **not an infection
+   probability**, and no user-facing copy may present it as a percentage probability.
 
-3. **阈值未校准**。low/medium/high 的分档是工程上的默认切分，
-   部署到真实人群前需要在保持原始患病率的测试集上重新评估
-   （项目 README「已知局限」一节的原话）。
+3. **The thresholds are uncalibrated.** The low/medium/high cut points are engineering
+   defaults; before deployment to a real population they need to be re-evaluated on a
+   test set that preserves the original prevalence (the wording of the "Known
+   limitations" section of the project README).
 
-== 0-100 分怎么来的 ==
+== How the 0-100 score is derived ==
 
-不能用 sigmoid(z)：没有截距时 z 恒偏正，绝大多数有症状的人都会逼近 100 分。
-也不能用「理论最小值」做下界：z_min 对应的是「拥有全部负系数症状」这种反常状态，
-真正无症状的人反而会落在区间中部（实测健康年轻人被判成 medium）。
+sigmoid(z) will not do: without an intercept z is persistently positive, and nearly
+everyone with symptoms would approach 100.
+Nor can the "theoretical minimum" serve as the lower bound: z_min corresponds to the
+perverse state of "having every symptom with a negative coefficient", so a genuinely
+asymptomatic person lands in the middle of the range instead (measured: a healthy
+young person came out as medium).
 
-采用**参考人锚定**：
+We therefore use **reference-person anchoring**:
 
-    score = 100 × (z − z_ref) / (z_ceil − z_ref)      结果裁剪到 [0, 100]
+    score = 100 × (z − z_ref) / (z_ceil − z_ref)      result clipped to [0, 100]
 
-    z_ref  = 同一季节、无任何症状与合并症、30 岁男性、病程 0 天
-    z_ceil = 同一季节、所有升高风险的特征都取到上界（age 110、day_ill 14、二值取 1）
+    z_ref  = same season, no symptoms and no comorbidities, 30-year-old male, day 0 of illness
+    z_ceil = same season, every risk-raising feature pushed to its upper bound
+             (age 110, day_ill 14, binary features 1)
 
-分数的含义因此是：**相对于此刻一个无症状的人，你在这个模型上处在多高的位置**。
-季节项在 z、z_ref、z_ceil 中相同，因而在比值里自然抵消——这是刻意的：
-wk_sin/wk_cos 描述的是人群层面的季节基线，不是个体风险差异。
-（季节项仍参与 z 的计算并写入评测回流，供将来做本地校准时使用。）
+The score therefore means: **how high you sit on this model relative to an
+asymptomatic person at this moment in time**.
+The seasonal term is identical in z, z_ref and z_ceil, so it cancels out of the ratio
+naturally -- and that is deliberate: wk_sin/wk_cos describe a population-level seasonal
+baseline, not an individual risk difference.
+(The seasonal term still enters the computation of z and is written to the evaluation
+log, so that a future local calibration can use it.)
 
-这依然只是**相对风险指数**，与概率无关。
+This is still only a **relative risk index**; it has nothing to do with probability.
 
-== 特征编码 ==
-训练数据 SINAN 用 1=有、2=无、9=未知，特征工程里 (df[c] == "1") 意味着
-「无」和「未知」都编码为 0。本模块的 yes→1 / no→0 / unknown→0 与之一致。
+== Feature encoding ==
+The SINAN training data uses 1=yes, 2=no, 9=unknown, and the feature engineering step
+(df[c] == "1") means that both "no" and "unknown" encode as 0. This module's
+yes->1 / no->0 / unknown->0 matches that.
 
-问卷里的三个流行病学暴露问题（EXPOSURE_CODES）**不会进入这里**：
-SINAN 数据没有这些变量，模型也就没有对应系数。encode_features 只读取
-symptoms / comorbidities / age / sex / day_ill，26 维向量与暴露答案无关。
+The three epidemiological exposure questions in the questionnaire (EXPOSURE_CODES)
+**never reach this module**: the SINAN data does not contain those variables, so the
+model has no coefficients for them. encode_features only reads
+symptoms / comorbidities / age / sex / day_ill; the 26-dimensional vector is
+independent of the exposure answers.
 
-季节项 wk_sin / wk_cos 由服务器按评估当日的 ISO 周计算，用户不填写。
-⚠️ 模型训练于南半球（巴西）数据，季节项对北半球用户方向相反；
-赤道地区季节性本身较弱，影响有限，但这是已知的迁移局限。
+The seasonal terms wk_sin / wk_cos are computed by the server from the ISO week of the
+assessment date; the user does not supply them.
+Warning: the model was trained on southern-hemisphere (Brazilian) data, so the seasonal
+term points the wrong way for northern-hemisphere users. Seasonality is itself weak near
+the equator, which limits the impact, but this is a known transfer limitation.
 """
 
 import json
@@ -75,24 +91,25 @@ logger = logging.getLogger(__name__)
 
 _MODEL_PATH = Path(__file__).resolve().parent / "model" / "dengue_models.json"
 
-# 风险分档阈值（工程默认值，未经人群校准）
+# Risk band thresholds (engineering defaults, not calibrated against a population)
 _LOW_MAX = 35.0
 _MEDIUM_MAX = 65.0
 
-# 模型键 -> 结果字段名
+# Model key -> result field name
 MODEL_KEYS: tuple[str, ...] = ("A", "B", "B2")
 RESULT_FIELDS: dict[str, str] = {"A": "dengue", "B": "worsening", "B2": "severe"}
 
-# 每个模型最多返回几条贡献项
+# Maximum number of contribution items returned per model
 EXPLAIN_TOP_N = 5
 
 
-# 参考人的年龄（用于锚定 0 分基准，不随用户年龄变化）
+# Age of the reference person (anchors the zero point; does not follow the user's age)
 _REF_AGE = 30.0
-# 特征上界（与 FormInput 的校验范围一致）
+# Feature upper bounds (matching the validation ranges on FormInput)
 _AGE_MAX = 110.0
 _DAY_ILL_MAX = 14.0
-# 季节项特征名（在参考人与上界中原样保留，使其在归一化时抵消）
+# Seasonal feature names (kept as-is in both the reference person and the ceiling,
+# so that they cancel out during normalisation)
 _SEASON_FEATS = ("wk_sin", "wk_cos")
 
 
@@ -101,12 +118,13 @@ def _season_part(coef: dict[str, float], wk_sin: float, wk_cos: float) -> float:
 
 
 def _reference_z(coef: dict[str, float], wk_sin: float, wk_cos: float) -> float:
-    """参考人：同季节、无任何症状与合并症、30 岁男性、病程 0 天。"""
+    """Reference person: same season, no symptoms or comorbidities, 30-year-old male,
+    day 0 of illness."""
     return coef.get("age", 0.0) * _REF_AGE + _season_part(coef, wk_sin, wk_cos)
 
 
 def _ceiling_z(coef: dict[str, float], wk_sin: float, wk_cos: float) -> float:
-    """上界：同季节，所有会升高风险的特征都取到上界。"""
+    """Ceiling: same season, every risk-raising feature pushed to its upper bound."""
     z = _season_part(coef, wk_sin, wk_cos)
     for name in FEATS:
         if name in _SEASON_FEATS:
@@ -116,19 +134,20 @@ def _ceiling_z(coef: dict[str, float], wk_sin: float, wk_cos: float) -> float:
             z += max(0.0, c * _AGE_MAX)
         elif name == "day_ill":
             z += max(0.0, c * _DAY_ILL_MAX)
-        else:  # 二值特征（含 sex_f）：取 0 与 1 中贡献更大的一侧
+        else:  # binary features (including sex_f): take whichever of 0 or 1 contributes more
             z += max(0.0, c)
     return z
 
 
 def _load_models() -> dict[str, dict]:
-    """读取模型系数文件；缺列会在打分时按 0 处理并告警。"""
+    """Load the model coefficient file; missing columns are treated as 0 at scoring
+    time and logged as a warning."""
     with open(_MODEL_PATH, encoding="utf-8") as f:
         raw = json.load(f)
     models: dict[str, dict] = {}
     for key in MODEL_KEYS:
         if key not in raw:
-            raise ValueError(f"模型文件缺少模型 {key}：{_MODEL_PATH}")
+            raise ValueError(f"Model file is missing model {key}: {_MODEL_PATH}")
         entry = raw[key]
         coef = {k: float(v) for k, v in entry["coef"].items()}
         models[key] = {
@@ -138,7 +157,11 @@ def _load_models() -> dict[str, dict]:
         }
         missing = set(FEATS) - set(coef)
         if missing:
-            logger.warning("模型 %s 缺少特征系数 %s，将按 0 处理", key, sorted(missing))
+            logger.warning(
+                "Model %s is missing feature coefficients %s, treating them as 0",
+                key,
+                sorted(missing),
+            )
     return models
 
 
@@ -146,20 +169,23 @@ _MODELS = _load_models()
 
 
 def get_epi_week(ref_date: date | None = None) -> int:
-    """评估当日的流行病学周（1-52）。第 53 周并入第 52 周，与训练时的 52 周编码一致。"""
+    """Epidemiological week of the assessment date (1-52). Week 53 is folded into
+    week 52, matching the 52-week encoding used during training."""
     ref = ref_date or date.today()
     return min(ref.isocalendar().week, 52)
 
 
 def _answer_to_int(answer: str) -> int:
-    """yes -> 1；no / unknown -> 0（与 SINAN 特征工程一致）。"""
+    """yes -> 1; no / unknown -> 0 (matching the SINAN feature engineering)."""
     return 1 if answer == "yes" else 0
 
 
 def encode_features(form: FormInput, ref_date: date | None = None) -> MLFeatures:
-    """问卷答案 -> 26 个模型特征（确定性编码，不依赖任何外部服务）。
+    """Questionnaire answers -> the 26 model features (deterministic encoding, with no
+    dependency on any external service).
 
-    注意：form.exposure 在此被**刻意忽略**。见模块文档「特征编码」一节。
+    Note: form.exposure is **deliberately ignored** here. See the "Feature encoding"
+    section of the module docstring.
     """
     values: dict[str, float | int] = {}
     for code in SYMPTOM_CODES:
@@ -177,10 +203,11 @@ def encode_features(form: FormInput, ref_date: date | None = None) -> MLFeatures
 
 
 def feature_code(name: str) -> str:
-    """特征名 -> 前端查表用的标签键。
+    """Feature name -> the label key the front end looks up.
 
-    症状与合并症去掉 `_x` 后缀（FEBRE_x -> FEBRE），这样前端可以直接复用
-    问卷里已有的多语言标签；5 个非二值特征没有对应的问卷项，用原名。
+    Symptoms and comorbidities drop the `_x` suffix (FEBRE_x -> FEBRE) so that the front
+    end can reuse the multilingual labels the questionnaire already has; the 5
+    non-binary features have no matching questionnaire item and keep their own names.
     """
     if name in NON_BINARY_FEATS:
         return name
@@ -196,10 +223,11 @@ def _level(score: float) -> str:
 
 
 def score_from_z(coef: dict[str, float], z: float, wk_sin: float, wk_cos: float) -> float:
-    """线性预测值 z -> 0-100 相对分数（参考人锚定，裁剪，保留 1 位小数）。
+    """Linear predictor z -> 0-100 relative score (reference-person anchored, clipped,
+    rounded to 1 decimal place).
 
-    score_one 与 planner 的区间端点都必须经过同一个函数，
-    保证同一个 z 在任何路径下得到完全相同的分数。
+    Both score_one and the planner's interval endpoints must go through this one
+    function, so that the same z yields exactly the same score along every code path.
     """
     z_ref = _reference_z(coef, wk_sin, wk_cos)
     z_ceil = _ceiling_z(coef, wk_sin, wk_cos)
@@ -209,17 +237,18 @@ def score_from_z(coef: dict[str, float], z: float, wk_sin: float, wk_cos: float)
 
 
 class DengueModel:
-    """三个逻辑回归模型的推理封装。"""
+    """Inference wrapper around the three logistic regression models."""
 
     def __init__(self, models: dict[str, dict] | None = None) -> None:
         self._models = models if models is not None else _MODELS
 
     def score_one(self, key: str, features: MLFeatures) -> ModelScore:
-        """单个模型打分。
+        """Score a single model.
 
-        z = Σ coef × feature（无截距）；
-        score = z 相对「同季节无症状参考人」的位置，上界为全风险因子拉满，
-        结果裁剪到 [0, 100]。详见模块文档。
+        z = Σ coef × feature (no intercept);
+        score = the position of z relative to the "same-season asymptomatic reference
+        person", with the ceiling being every risk factor maxed out, clipped to
+        [0, 100]. See the module docstring for details.
         """
         coef = self._models[key]["coef"]
         data = features.model_dump()
@@ -228,19 +257,22 @@ class DengueModel:
         return ModelScore(score=score, level=_level(score), z=round(z, 4))
 
     def score_all(self, features: MLFeatures) -> dict[str, ModelScore]:
-        """三个模型全部打分，返回 {"A":…, "B":…, "B2":…}。"""
+        """Score all three models; returns {"A": …, "B": …, "B2": …}."""
         return {key: self.score_one(key, features) for key in MODEL_KEYS}
 
     def explain_one(
         self, key: str, features: MLFeatures, top_n: int = EXPLAIN_TOP_N
     ) -> list[FeatureContribution]:
-        """拆解单个模型的 z，返回贡献最大的若干项。
+        """Decompose a single model's z and return the largest contributions.
 
-        z = Σ coef × feature，因此每一项 coef[name] × value 就是该特征对本次
-        评分的加减量——这是逻辑回归可解释性的全部内容，没有任何近似。
+        Since z = Σ coef × feature, each term coef[name] × value is exactly how much
+        that feature added to or subtracted from this score -- that is the whole of
+        logistic regression interpretability, with no approximation involved.
 
-        贡献为 0 的项（特征值为 0，或系数缺失）直接跳过：它们对结果没有影响，
-        列出来只会稀释真正起作用的那几项。按绝对值降序，取前 top_n 条。
+        Terms contributing 0 (feature value 0, or a missing coefficient) are skipped:
+        they have no effect on the result, and listing them would only dilute the few
+        that actually matter. Sorted by absolute value, descending; the top top_n are
+        returned.
         """
         coef = self._models[key]["coef"]
         data = features.model_dump()
@@ -268,18 +300,20 @@ class DengueModel:
     def explain_all(
         self, features: MLFeatures, top_n: int = EXPLAIN_TOP_N
     ) -> dict[str, list[FeatureContribution]]:
-        """三个模型的贡献拆解，键为响应字段名 dengue / worsening / severe。"""
+        """Contribution breakdown for all three models, keyed by the response field
+        names dengue / worsening / severe."""
         return {
             RESULT_FIELDS[key]: self.explain_one(key, features, top_n)
             for key in MODEL_KEYS
         }
 
     def coefficients(self, key: str) -> dict[str, float]:
-        """某个模型的系数字典（只读用途，供 planner 计算分数边界与信息价值）。"""
+        """Coefficient dictionary for one model (read-only; used by the planner to
+        compute score bounds and information value)."""
         return self._models[key]["coef"]
 
     def info(self) -> dict[str, dict]:
-        """模型元信息（名称与 AUC），供 /api/health 等展示。"""
+        """Model metadata (name and AUC), for display by /api/health and similar."""
         return {
             key: {"name": m["name"], "auc": m["auc"]}
             for key, m in self._models.items()
@@ -290,9 +324,9 @@ _model: DengueModel | None = None
 
 
 def get_model() -> DengueModel:
-    """进程内单例。"""
+    """Process-wide singleton."""
     global _model
     if _model is None:
         _model = DengueModel()
-        logger.info("登革热模型已加载：%s", list(_model.info()))
+        logger.info("Dengue models loaded: %s", list(_model.info()))
     return _model

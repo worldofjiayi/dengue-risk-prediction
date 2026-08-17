@@ -1,22 +1,26 @@
-"""流行病学情报工具：把「某地登革热什么情况」这个问题变成一次可核查的查询。
+"""Epidemiological intel tool: turns "what is dengue like in X" into one checkable lookup.
 
-这是聊天模型唯一能自主调用的工具（见 deepseek_client.chat_with_tools）。
-它做两件事，两件都可追溯到具名来源：
+This is the only tool the chat model may call on its own (see
+deepseek_client.chat_with_tools). It does two things, both traceable to a named source:
 
-  1. 地区流行程度 —— 查 app/data/dengue_endemicity.json 的国家/地区表
-     （来源：WHO 登革热实况报道 + CDC 登革热风险地图，2026）。
-     这是一张粗粒度的**旅行背景表**，不是监测数据，也绝不参与任何评分。
-  2. WHO 疾病暴发新闻（Disease Outbreak News）—— 实时读 WHO 的公开 OData 接口，
-     筛出标题里含目标国家的条目；没有国家级条目就返回最新的全球通报
-     （它们的标题本身就写着 "Global situation"，不会被误读成针对该国的通报）。
+  1. Regional endemicity -- looks up the country/region table in
+     app/data/dengue_endemicity.json (sources: WHO dengue fact sheet + CDC dengue risk
+     map, 2026). This is a coarse-grained **travel background table**, not surveillance
+     data, and it never takes part in any scoring.
+  2. WHO Disease Outbreak News -- reads WHO's public OData endpoint live and keeps the
+     entries whose title contains the target country; when there is no country-level entry
+     it returns the latest global notices instead (their titles literally say "Global
+     situation", so they cannot be misread as a notice about that country).
 
-**不变量：查不到就说查不到。** 网络失败时返回 lookup_failed=true 且
-who_notices=[]，绝不用「常识」编一条 WHO 链接出来。链接一律由接口返回的
-UrlName 拼成，模型无从插手；校验器（verifier.verify_chat_reply）再在出口处
-核对回复里的每个链接确实来自本轮工具结果。
+**Invariant: if we cannot find it, we say we cannot find it.** On a network failure the
+result is lookup_failed=true with who_notices=[]; a WHO link is never made up from "general
+knowledge". Links are always assembled from the UrlName the endpoint returned, with no way
+for the model to interfere; the verifier (verifier.verify_chat_reply) then checks at the
+exit that every link in the reply really came from this turn's tool result.
 
-WHO 列表在进程内缓存 12 小时：DON 是低频发布的公告，每轮聊天都去打一次
-who.int 既慢又不礼貌。缓存可注入，测试用它控制时间与失败路径。
+The WHO list is cached in-process for 12 hours: DON items are infrequent announcements, and
+hitting who.int on every chat turn is both slow and impolite. The cache is injectable, and
+tests use it to control time and the failure path.
 """
 
 import json
@@ -35,10 +39,10 @@ logger = logging.getLogger(__name__)
 
 _DATA_PATH = Path(__file__).resolve().parent / "data" / "dengue_endemicity.json"
 
-# 暴露给聊天模型的函数名（提示词、客户端、流水线三处共用同一个常量）
+# Function name exposed to the chat model (prompt, client and pipeline all share this constant)
 INTEL_TOOL_NAME = "lookup_dengue_context"
 
-# WHO 疾病暴发新闻（Disease Outbreak News）OData 接口：公开、无需鉴权
+# WHO Disease Outbreak News OData endpoint: public, no authentication needed
 WHO_DON_API = (
     "https://www.who.int/api/news/diseaseoutbreaknews"
     "?$filter=contains(Title,'Dengue')&$orderby=PublicationDateAndTime desc"
@@ -46,15 +50,16 @@ WHO_DON_API = (
 WHO_ITEM_BASE = "https://www.who.int/emergencies/disease-outbreak-news/item/"
 WHO_TIMEOUT = 8.0
 
-# 进程内缓存有效期：12 小时
+# In-process cache lifetime: 12 hours
 CACHE_TTL_SECONDS = 12 * 60 * 60
-# 单次查询最多回传几条通报
+# How many notices one lookup returns at most
 MAX_NOTICES = 3
 
 _CJK_RE = re.compile(r"[㐀-䶿一-鿿]")
 
-# MOCK 模式下的 WHO 通报（**真实存在的 DON 条目**，不是编造的链接）。
-# 走与真实模式完全相同的筛选逻辑，因此两种模式的 payload 形状逐字段一致。
+# WHO notices used in MOCK mode (**real, existing DON entries**, not made-up links).
+# They go through exactly the same selection logic as in real mode, so the payload shape is
+# field-for-field identical in both modes.
 MOCK_NOTICE_ITEMS: tuple[dict, ...] = (
     {
         "Title": "Dengue - Global situation",
@@ -85,20 +90,20 @@ MOCK_NOTICE_ITEMS: tuple[dict, ...] = (
 
 
 class IntelLookupError(Exception):
-    """WHO 通报拉取失败。只在模块内部使用，对外转成 lookup_failed=True。"""
+    """WHO notice fetch failed. Internal to this module; surfaces as lookup_failed=True."""
 
 
-# ---------- 地区表 ----------
+# ---------- Regional table ----------
 
 
 @lru_cache(maxsize=1)
 def load_endemicity() -> dict:
-    """读取并缓存 dengue_endemicity.json。"""
+    """Read and cache dengue_endemicity.json."""
     return json.loads(_DATA_PATH.read_text(encoding="utf-8"))
 
 
 def sources_note() -> dict:
-    """地区表的来源声明（WHO 实况报道 + CDC 地图，2026）。"""
+    """Source statement for the regional table (WHO fact sheet + CDC map, 2026)."""
     return dict(load_endemicity().get("_sources", {}))
 
 
@@ -108,11 +113,12 @@ def _normalise_key(text: str) -> str:
 
 @lru_cache(maxsize=1)
 def _alias_matchers() -> tuple[re.Pattern | None, tuple[str, ...]]:
-    """预编译别名匹配器：拉丁别名走一条大正则，CJK 别名走子串匹配。
+    """Pre-compiled alias matchers: one big regex for Latin aliases, substring match for CJK.
 
-    两边都按长度降序，保证 "south korea" 先于 "korea"、"el salvador" 先于
-    "salvador" 命中。拉丁别名两侧用「非字母数字」前后瞻而不是 \\b——
-    别名里有 "u.s."、"côte d'ivoire" 这种带标点的写法。
+    Both sides are sorted by descending length, so "south korea" matches before "korea" and
+    "el salvador" before "salvador". Latin aliases are bounded by "not alphanumeric"
+    look-around rather than \\b -- some aliases carry punctuation, such as "u.s." and
+    "côte d'ivoire".
     """
     aliases = load_endemicity()["aliases"]
     latin = sorted((k for k in aliases if not _CJK_RE.search(k)), key=len, reverse=True)
@@ -127,17 +133,17 @@ def _alias_matchers() -> tuple[re.Pattern | None, tuple[str, ...]]:
 
 
 def find_location(text: str) -> str | None:
-    """在自由文本里找出第一个可识别的国家/地区，返回规范英文名。
+    """Find the first recognisable country/region in free text; return the canonical English name.
 
-    用于两处：模型把整句话当 location 传进来时的兜底解析，以及 MOCK 模式下
-    判断这轮该不该模拟一次工具调用。
+    Used in two places: as the fallback parse when the model passes a whole sentence in as
+    location, and in MOCK mode to decide whether this turn should simulate a tool call.
     """
     if not text:
         return None
     aliases = load_endemicity()["aliases"]
     pattern, cjk = _alias_matchers()
 
-    best: tuple[int, int, str] | None = None  # (长度, -位置, 规范名)
+    best: tuple[int, int, str] | None = None  # (length, -position, canonical name)
     if pattern is not None:
         for match in pattern.finditer(text):
             key = _normalise_key(match.group(1))
@@ -157,7 +163,7 @@ def find_location(text: str) -> str | None:
 
 
 def resolve_location(location: str) -> tuple[str, bool]:
-    """把用户/模型给的地名解析成 (规范英文名, 是否命中)。"""
+    """Resolve a place name from the user/model into (canonical English name, matched?)."""
     raw = (location or "").strip()
     if not raw:
         return "", False
@@ -174,26 +180,26 @@ def resolve_location(location: str) -> tuple[str, bool]:
     return raw, False
 
 
-# ---------- WHO 通报 ----------
+# ---------- WHO notices ----------
 
-# 模块级带时间戳的缓存。items=None 表示「还没成功拉过」。
+# Module-level cache with a timestamp. items=None means "never fetched successfully yet".
 _NOTICE_CACHE: dict = {"fetched_at": 0.0, "items": None}
 
 
 def clear_notice_cache() -> None:
-    """清空 WHO 通报缓存（测试用）。"""
+    """Clear the WHO notice cache (for tests)."""
     _NOTICE_CACHE["fetched_at"] = 0.0
     _NOTICE_CACHE["items"] = None
 
 
 def seed_notice_cache(items: list[dict], fetched_at: float | None = None) -> None:
-    """直接写入缓存（测试用：验证 12 小时内不再发请求）。"""
+    """Write the cache directly (for tests: verify no request is sent within 12 hours)."""
     _NOTICE_CACHE["items"] = list(items)
     _NOTICE_CACHE["fetched_at"] = time.time() if fetched_at is None else fetched_at
 
 
 def notice_cache_state() -> dict:
-    """只读快照（测试与排障用）。"""
+    """Read-only snapshot (for tests and troubleshooting)."""
     items = _NOTICE_CACHE["items"]
     return {
         "fetched_at": _NOTICE_CACHE["fetched_at"],
@@ -202,32 +208,37 @@ def notice_cache_state() -> dict:
 
 
 def fetch_who_notices() -> list[dict]:
-    """真实网络请求：拉 WHO 疾病暴发新闻里标题含 Dengue 的条目。"""
+    """Real network request: fetch WHO Disease Outbreak News entries with Dengue in the title."""
     try:
         with httpx.Client(timeout=WHO_TIMEOUT) as client:
             resp = client.get(WHO_DON_API, headers={"Accept": "application/json"})
             resp.raise_for_status()
             payload = resp.json()
-    except Exception as exc:  # httpx 各类异常 + JSON 解析异常
-        raise IntelLookupError(f"WHO 疾病暴发新闻接口不可用：{exc}") from exc
+    except Exception as exc:  # every httpx exception + JSON parse errors
+        raise IntelLookupError(
+            f"The WHO Disease Outbreak News API is unavailable: {exc}"
+        ) from exc
     items = payload.get("value") if isinstance(payload, dict) else None
     if not isinstance(items, list):
-        raise IntelLookupError("WHO 接口返回结构异常：缺少 value 列表")
+        raise IntelLookupError("Malformed WHO API response: missing value list")
     return items
 
 
 def _cached_notices(
     fetcher: Callable[[], list[dict]], now: float
 ) -> tuple[list[dict], bool]:
-    """返回 (原始条目, 是否查询失败)。缓存命中就不发请求。"""
+    """Return (raw items, lookup failed?). A cache hit sends no request."""
     cached = _NOTICE_CACHE["items"]
     if cached is not None and (now - _NOTICE_CACHE["fetched_at"]) < CACHE_TTL_SECONDS:
         return cached, False
     try:
         items = fetcher()
     except Exception:
-        # 拿不到就诚实地说拿不到——绝不退回「大概是这个链接」
-        logger.warning("WHO 疾病暴发新闻拉取失败，本轮不提供任何来源", exc_info=True)
+        # If we cannot get it, say so honestly -- never fall back to "this is probably the link"
+        logger.warning(
+            "Failed to fetch WHO Disease Outbreak News, no sources will be offered this round",
+            exc_info=True,
+        )
         return [], True
     _NOTICE_CACHE["items"] = items
     _NOTICE_CACHE["fetched_at"] = now
@@ -251,10 +262,11 @@ def _to_notice(item: dict) -> dict | None:
 
 
 def select_notices(items: list[dict], canonical: str | None) -> list[dict]:
-    """挑出与目标国家相关的通报；没有就退回最新的全球通报。
+    """Pick the notices about the target country; with none, fall back to the latest global ones.
 
-    退回全球通报是安全的：它们的标题写着 "Global situation"，本身就说明
-    自己不是针对某个国家的公告，模型引用时不会造成误导。
+    Falling back to global notices is safe: their titles say "Global situation", which by
+    itself states that they are not an announcement about any one country, so the model
+    cannot mislead by citing them.
     """
     ordered = sorted(items, key=_publication_key, reverse=True)
     chosen: list[dict] = []
@@ -267,7 +279,7 @@ def select_notices(items: list[dict], canonical: str | None) -> list[dict]:
     return notices[:MAX_NOTICES]
 
 
-# ---------- 对外工具函数 ----------
+# ---------- Public tool function ----------
 
 
 def lookup_dengue_context(
@@ -276,15 +288,16 @@ def lookup_dengue_context(
     now: float | None = None,
     fetcher: Callable[[], list[dict]] | None = None,
 ) -> dict:
-    """查询某地的登革热背景。这就是聊天模型可以调用的那个工具。
+    """Look up the dengue background for a place. This is the tool the chat model may call.
 
-    返回固定形状（MOCK 与真实模式完全一致）：
-        location      规范英文名；没认出来就是原样输入
-        matched       是否在地区表里认出了这个地名
+    The shape of the return value is fixed (identical in MOCK and real mode):
+        location      canonical English name; the raw input if it was not recognised
+        matched       whether the place name was recognised in the regional table
         endemicity    high | moderate | low | none | unknown
-        season_note   简短的季节/地域说明；未命中为 None
-        who_notices   ≤3 条 {title, date, url}，按发布时间倒序
-        lookup_failed WHO 接口这次没拉到（网络失败），who_notices 必为空
+        season_note   short seasonal/geographic note; None when there is no match
+        who_notices   <=3 items of {title, date, url}, newest publication first
+        lookup_failed the WHO endpoint returned nothing this time (network failure);
+                      who_notices is then necessarily empty
     """
     raw = (location or "").strip()
     canonical, matched = resolve_location(raw)
@@ -309,7 +322,7 @@ def lookup_dengue_context(
         "lookup_failed": failed,
     }
     logger.info(
-        "情报查询：location=%r -> %s（matched=%s, endemicity=%s, notices=%d, failed=%s）",
+        "Intel lookup: location=%r -> %s (matched=%s, endemicity=%s, notices=%d, failed=%s)",
         raw,
         result["location"],
         matched,

@@ -1,21 +1,23 @@
-"""场景化评测运行器（eval harness）：回归门禁 + 失败案例库。
+"""Scenario-based evaluation runner (eval harness): regression gate + failure library.
 
-对 service/eval/scenarios.json 里的每个场景，用 FastAPI TestClient 在**进程内**
-调用 /api/assess、/api/chat 或 /api/destination（强制 MOCK_MODE=true，
-不发任何真实网络请求，也**不会产生任何检索费用**），逐条执行声明式检查（check），
-最后汇总通过/失败。
+For every scenario in service/eval/scenarios.json, call /api/assess, /api/chat or
+/api/destination **in-process** with a FastAPI TestClient (MOCK_MODE=true is forced, so
+no real network request is made and **no search cost is incurred at all**), run the
+declarative checks one at a time, and summarise passes/failures at the end.
 
-用法（Windows，项目根目录）：
+Usage (Windows, from the project root):
     .venv\\Scripts\\python.exe service\\scripts\\eval_run.py
     .venv\\Scripts\\python.exe service\\scripts\\eval_run.py --json
     .venv\\Scripts\\python.exe service\\scripts\\eval_run.py --only healthy-young-adult,textbook-dengue
-    .venv\\Scripts\\python.exe service\\scripts\\eval_run.py --scenarios 路径\\其他场景.json
+    .venv\\Scripts\\python.exe service\\scripts\\eval_run.py --scenarios path\\other-scenarios.json
 
-失败的场景会把请求+响应完整落盘到 service/eval/failures/<id>.json（失败案例库），
-每次运行前清空上一次的残留文件。退出码：0 全部通过，1 有失败，2 用法/文件错误。
+A failing scenario has its request + response written out in full to
+service/eval/failures/<id>.json (the failure library); leftovers from the previous run
+are cleared before each run. Exit codes: 0 all passed, 1 some failed, 2 usage/file error.
 
-这份 harness 的定位（项目方法论）：它是「唯一能告诉你要不要重训模型」的东西——
-场景固化的是**当前已验证的行为**，模型或规则一旦变化，先在这里看见。
+Where this harness sits in the project's methodology: it is the one thing that "can tell
+you whether the model needs retraining" -- the scenarios pin down **the behaviour that is
+currently verified**, so any change to the model or the rules is seen here first.
 """
 
 import argparse
@@ -36,27 +38,29 @@ ENDPOINTS = {
     "destination": "/api/destination",
 }
 
-# 一条来源允许出现的 origin 标签（与 schemas.SourceOrigin 一致，刻意不 import）
+# Origin labels a source may carry (matches schemas.SourceOrigin; deliberately not imported)
 SOURCE_ORIGINS = ("who", "search")
 
-# /api/destination 绝不能出现的字段：地点不参与打分，这里没有任何评分
+# Fields /api/destination must never carry: a location takes no part in scoring, no scores here
 FORBIDDEN_SCORE_FIELDS = ("dengue", "worsening", "severe", "epi_week", "advice_source")
 
-# 响应里三个模型的字段名（与 AssessmentResult 一致）
+# Field names of the three models in the response (matches AssessmentResult)
 MODEL_FIELDS = ("dengue", "worsening", "severe")
 
-# advice 对象的键必须按此顺序序列化（就医优先，见 schemas.Advice 的说明）
+# The advice object's keys must serialise in this order (seek care first, see schemas.Advice)
 ADVICE_ORDER = ["medical", "monitoring", "protection"]
 
 LEVEL_ORDER = ("low", "medium", "high")
 
-# scores_match_scenario 的 z 值比较容差：同一进程、同一系数、同一日期下
-# 两次评估的 z 应当逐位相同，容差只为吸收浮点噪声。
+# z-comparison tolerance for scores_match_scenario: within the same process, the same
+# coefficients and the same date, two assessments should give z values identical digit
+# for digit; the tolerance is only there to absorb floating-point noise.
 Z_TOLERANCE = 1e-6
 
-# ---- 各语言的「就医/急迫性」关键词表（medical_urgency 检查） ----
-# 关键词固化的是当前 MOCK 建议文案里确实存在的表述；真实 DeepSeek 输出
-# 也应命中同一词表——命不中就是值得进失败案例库的输出。
+# ---- Per-language "seek care / urgency" keyword tables (medical_urgency check) ----
+# The keywords pin down wording that really exists in the current MOCK advice copy; real
+# DeepSeek output should hit the same table -- output that misses it is exactly the kind
+# worth putting in the failure library.
 URGENCY_KEYWORDS: dict[str, list[str]] = {
     "zh-CN": ["就医", "就诊", "急诊"],
     "zh-TW": ["就醫", "就診", "急診"],
@@ -78,9 +82,10 @@ URGENCY_KEYWORDS: dict[str, list[str]] = {
     ],
 }
 
-# ---- 追问回复必须提到的总体档位标签（reply_mentions_tier 检查） ----
-# 与 app/deepseek_client.py 的 _MOCK_CHAT_TIER_LABELS 一致；刻意**不**从
-# app 包导入——harness 固化的是期望行为，文案变了应当在这里报红，而不是静默跟随。
+# ---- Overall-band labels a follow-up reply must mention (reply_mentions_tier check) ----
+# Same as _MOCK_CHAT_TIER_LABELS in app/deepseek_client.py; deliberately **not** imported
+# from the app package -- the harness pins down expected behaviour, so a change in the
+# copy should turn red here rather than being silently followed.
 TIER_LABELS: dict[str, dict[str, str]] = {
     "zh-CN": {"low": "较低", "medium": "中等", "high": "偏高"},
     "zh-TW": {"low": "較低", "medium": "中等", "high": "偏高"},
@@ -89,44 +94,47 @@ TIER_LABELS: dict[str, dict[str, str]] = {
     "pt": {"low": "baixo", "medium": "moderado", "high": "alto"},
 }
 
-# ---- 概率化表述检测（no_probability_language 检查） ----
-# 同一字符串里同时出现「数字百分比」与「概率类措辞」即判失败：
-# 模型是无截距/相对评分，任何 "37% 概率感染" 式的输出都是违约文案。
+# ---- Probability-wording detection (no_probability_language check) ----
+# A string that contains both "a numeric percentage" and "probability-style wording"
+# fails: the model is intercept-free / relative scoring, so any output of the
+# "37% chance of infection" kind is copy that breaks the contract.
 PERCENT_RE = re.compile(r"\d+(?:[.,]\d+)?\s*%")
 PROBABILITY_RE = re.compile(
     r"概率|几率|機率|probabilit|probabilidad|probabilidade|chance|likelihood",
     re.IGNORECASE,
 )
 
-# ---- 引用链接检测（sources_urls_allowed 检查） ----
-# 同样刻意不从 app.verifier 导入：harness 用**独立写的**正则与更严格的
-# 「精确相等」判定去核对同一条不变量——回复里出现的每个链接都必须真的在
-# 本轮 sources 里。两边都能通过，才说明这条不变量不是靠某一处实现巧合成立的。
+# ---- Citation link detection (sources_urls_allowed check) ----
+# Again deliberately not imported from app.verifier: the harness checks the same
+# invariant with an **independently written** regex and a stricter "exact equality"
+# test -- every link in the reply must really be in this round's sources. Only when both
+# sides pass do we know the invariant does not hold by coincidence in one implementation.
 URL_RE = re.compile(r"https?://[^\s<>\"'）)】\[\]（(，。；、]+")
 URL_TRAILING = ".,;:!?'\")]}>，。；！？、）】"
 
 ADVICE_SOURCES = ("llm", "template")
 
-# 中文（含繁体）语言代码：关键词/标签用子串匹配，拉丁语言用词边界匹配
+# Chinese (including Traditional) language codes: keywords/labels match as substrings,
+# Latin-script languages match on word boundaries
 _CJK_LANGUAGES = ("zh-CN", "zh-TW")
 
 
-# ---------- 基础设施 ----------
+# ---------- Infrastructure ----------
 
 
 def build_client():
-    """强制 MOCK_MODE、关闭评测回流后，构造进程内 TestClient。
+    """Build an in-process TestClient with MOCK_MODE forced and the feedback log off.
 
-    与 tests/test_pipeline.py 的 client fixture 同一套路：先设环境变量、
-    清掉配置缓存，再导入 app。EVAL_LOG_PATH 置空是为了不让 harness 流量
-    混进 data/assessments.jsonl 的真实回流数据。
+    Same routine as the client fixture in tests/test_pipeline.py: set the environment
+    variables first, clear the settings cache, then import app. EVAL_LOG_PATH is emptied
+    to keep harness traffic out of the real feedback data in data/assessments.jsonl.
     """
     os.environ["MOCK_MODE"] = "true"
     os.environ["EVAL_LOG_PATH"] = ""
     if str(SERVICE_ROOT) not in sys.path:
         sys.path.insert(0, str(SERVICE_ROOT))
 
-    # 压掉 app / httpx 的 INFO 日志：几十个场景的流水线日志会把结果行淹掉
+    # Squash app / httpx INFO logs: pipeline logs from dozens of scenarios drown the results
     for name in ("app", "httpx"):
         logging.getLogger(name).setLevel(logging.WARNING)
 
@@ -142,23 +150,23 @@ def build_client():
 
 
 def load_scenarios(path: Path) -> list[dict]:
-    """读取并粗校验场景文件：必须是对象列表，id 唯一，endpoint 合法。"""
+    """Read and sanity-check the scenario file: list of objects, unique ids, valid endpoint."""
     raw = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(raw, list):
-        raise ValueError(f"场景文件顶层必须是 JSON 列表：{path}")
+        raise ValueError(f"Scenario file top level must be a JSON list: {path}")
     seen: set[str] = set()
     for scenario in raw:
         if not isinstance(scenario, dict) or "id" not in scenario:
-            raise ValueError("每个场景必须是含 id 的 JSON 对象")
+            raise ValueError("Every scenario must be a JSON object with an id")
         sid = scenario["id"]
         if sid in seen:
-            raise ValueError(f"场景 id 重复：{sid}")
+            raise ValueError(f"Duplicate scenario id: {sid}")
         seen.add(sid)
         endpoint = scenario.get("endpoint", "assess")
         if endpoint not in ENDPOINTS:
-            raise ValueError(f"场景 {sid} 的 endpoint 非法：{endpoint}")
+            raise ValueError(f"Scenario {sid} has an invalid endpoint: {endpoint}")
         if "request" not in scenario or "checks" not in scenario:
-            raise ValueError(f"场景 {sid} 缺少 request 或 checks")
+            raise ValueError(f"Scenario {sid} is missing request or checks")
     return raw
 
 
@@ -167,7 +175,10 @@ def _request_language(scenario: dict) -> str:
 
 
 def _dig(body, path: str):
-    """按点号路径取值，如 "dengue.z"、"advice.medical.0"。列表段用整数下标。"""
+    """Look up a value by dotted path, e.g. "dengue.z" or "advice.medical.0".
+
+    A list segment uses an integer index.
+    """
     cur = body
     for part in path.split("."):
         if isinstance(cur, list):
@@ -182,7 +193,9 @@ def _dig(body, path: str):
 
 
 def _context_tier(scenario: dict) -> str:
-    """追问场景：从前端回传的 context 里取三模型等级的最高档（同 pipeline.overall_tier）。"""
+    """Follow-up scenarios: take the highest of the three model levels out of the context
+    posted back by the front end (same as pipeline.overall_tier).
+    """
     context = scenario.get("request", {}).get("context") or {}
     best = "low"
     for field in MODEL_FIELDS:
@@ -195,7 +208,7 @@ def _context_tier(scenario: dict) -> str:
 
 
 def _gather_text_fields(body: dict) -> list[str]:
-    """no_probability_language 检查的扫描范围：summary + 三类建议的每一条。"""
+    """What no_probability_language scans: summary + each item of the three advice kinds."""
     texts: list[str] = []
     summary = body.get("summary")
     if isinstance(summary, str):
@@ -208,9 +221,10 @@ def _gather_text_fields(body: dict) -> list[str]:
     return texts
 
 
-# ---------- 检查实现 ----------
-# 每个检查函数：(check, scenario, status, body, runner) -> (ok, detail)
-# detail 必须带上**实际值**——失败时能直接看出差在哪，这是失败案例库的意义。
+# ---------- Check implementations ----------
+# Every check function: (check, scenario, status, body, runner) -> (ok, detail)
+# detail must carry the **actual value** -- on a failure you can see straight away where
+# the difference is; that is the point of the failure library.
 
 
 def _check_status(check, scenario, status, body, runner):
@@ -356,11 +370,12 @@ def _check_reply_mentions_tier(check, scenario, status, body, runner):
 
 
 def _citable_text(body: dict) -> str:
-    """会被扫描链接的所有字段：追问回复、目的地要点、目的地建议。
+    """All fields scanned for links: the reply, destination findings, destination advice.
 
-    /api/chat 只有 reply；/api/destination 的「模型写的那部分」是 recent_findings，
-    建议虽然是固定文案，也一起扫——固化的不变量是「响应里出现的链接必须来自
-    sources」，而不是「reply 里的链接必须来自 sources」。
+    /api/chat only has reply; for /api/destination "the part the model wrote" is
+    recent_findings, and although the advice is fixed copy it gets scanned too -- the
+    invariant being pinned down is "every link appearing in the response must come from
+    sources", not "every link in reply must come from sources".
     """
     parts = [str(body.get("reply") or "")]
     findings = body.get("recent_findings")
@@ -375,11 +390,13 @@ def _citable_text(body: dict) -> str:
 
 
 def _check_sources_urls_allowed(check, scenario, status, body, runner):
-    """响应里的每个链接都必须出现在本轮 sources 中（可选地约束 sources 条数）。
+    """Every link in the response must appear in this round's sources (optionally with a
+    bound on the number of sources).
 
-    这是「不许编造引用」在端到端层面的门禁：sources 是接口真正返回过的东西，
-    生成的文字只能引用它们。min_sources / max_sources 用来分别固化「问了地点就该有
-    来源」和「没问地点就不该有来源」两种场景。
+    This is the end-to-end gate for "no fabricated citations": sources is what the API
+    really returned, and the generated text may only cite those. min_sources /
+    max_sources pin down the two scenarios "asking about a location should produce
+    sources" and "not asking about a location should produce none".
     """
     if not isinstance(body, dict):
         return False, f"response body is not an object (HTTP {status})"
@@ -404,10 +421,11 @@ def _check_sources_urls_allowed(check, scenario, status, body, runner):
 
 
 def _check_sources_origins(check, scenario, status, body, runner):
-    """每条来源都必须标明出处，且期望的出处都出现了。
+    """Every source must state where it came from, and the expected origins must appear.
 
-    provenance 是这个功能的全部意义：WHO 通报与网络检索的时效性和可信度不同，
-    前端要能分别标注。一条没有 origin 的来源，用户就无从判断它有多硬。
+    Provenance is the whole point of this feature: WHO notices and web search results
+    differ in recency and trustworthiness, and the front end has to label them
+    separately. With a source that has no origin, the user cannot judge how solid it is.
     """
     if not isinstance(body, dict) or not isinstance(body.get("sources"), list):
         return False, f"response has no sources list (HTTP {status})"
@@ -424,7 +442,10 @@ def _check_sources_origins(check, scenario, status, body, runner):
 
 
 def _check_search_count(check, scenario, status, body, runner):
-    """本轮真的检索了几次。0 用来固化「没有地点就一分钱都不花」这条规则。"""
+    """How many searches this round really made.
+
+    0 is what pins down the rule "no location means not a cent is spent".
+    """
     expect = check.get("expect")
     got = body.get("search_count") if isinstance(body, dict) else None
     maximum = check.get("max")
@@ -437,7 +458,9 @@ def _check_search_count(check, scenario, status, body, runner):
 
 
 def _check_no_model_scores(check, scenario, status, body, runner):
-    """目的地查询绝不能带评分：地点从来不参与打分，编一个「目的地风险分」是撒谎。"""
+    """A destination lookup must never carry scores: a location never takes part in
+    scoring, so inventing a "destination risk score" would be a lie.
+    """
     if not isinstance(body, dict):
         return False, f"response body is not an object (HTTP {status})"
     present = [f for f in FORBIDDEN_SCORE_FIELDS if f in body]
@@ -447,7 +470,9 @@ def _check_no_model_scores(check, scenario, status, body, runner):
 
 
 def _check_advice_source(check, scenario, status, body, runner):
-    """advice_source 必须如实说明这段文字是模型写的还是模板兜底的。"""
+    """advice_source must say truthfully whether this text was written by the model or
+    came from the template fallback.
+    """
     expect = check.get("expect")
     if expect not in ADVICE_SOURCES:
         return False, f"advice_source check needs expect in {list(ADVICE_SOURCES)}, got {expect!r}"
@@ -503,11 +528,14 @@ CHECKS = {
 }
 
 
-# ---------- 运行器 ----------
+# ---------- Runner ----------
 
 
 class ScenarioRunner:
-    """按需执行场景请求并缓存响应（scores_match_scenario 需要引用别的场景）。"""
+    """Run scenario requests on demand and cache the responses.
+
+    scores_match_scenario needs to reference other scenarios.
+    """
 
     def __init__(self, client, scenarios: list[dict]) -> None:
         self.client = client
@@ -537,7 +565,7 @@ class ScenarioRunner:
             else:
                 try:
                     ok, detail = fn(check, scenario, status, body, self)
-                except Exception as exc:  # 检查自身崩溃也算失败，而不是把整轮跑挂掉
+                except Exception as exc:  # a crashing check fails, it never kills the run
                     ok, detail = False, f"check raised {type(exc).__name__}: {exc}"
             checks.append({"type": ctype, "ok": bool(ok), "detail": detail})
         return {
@@ -551,14 +579,14 @@ class ScenarioRunner:
 
 
 def _clear_failures_dir(failures_dir: Path) -> None:
-    """建目录并清掉上一轮的失败转储——目录里只保留本轮的失败案例。"""
+    """Create the directory and clear last round's dumps -- it keeps only this run's cases."""
     failures_dir.mkdir(parents=True, exist_ok=True)
     for stale in failures_dir.glob("*.json"):
         stale.unlink()
 
 
 def _dump_failure(failures_dir: Path, scenario: dict, result: dict, body) -> Path:
-    """失败案例落盘：请求 + 响应 + 失败的检查，足以离线复盘。"""
+    """Dump a failure case: request + response + failed checks, enough to review offline."""
     record = {
         "id": scenario["id"],
         "description": scenario.get("description", ""),
@@ -580,13 +608,13 @@ def run_scenarios(
     only: list[str] | None = None,
     failures_dir: Path = DEFAULT_FAILURES_DIR,
 ) -> dict:
-    """执行（可过滤的）场景集合，返回汇总结果字典。"""
+    """Run the (optionally filtered) set of scenarios and return a summary dict."""
     selected = scenarios
     if only:
         by_id = {s["id"]: s for s in scenarios}
         unknown = [sid for sid in only if sid not in by_id]
         if unknown:
-            raise ValueError(f"--only 指定了不存在的场景 id：{unknown}")
+            raise ValueError(f"--only named scenario ids that do not exist: {unknown}")
         selected = [by_id[sid] for sid in only]
 
     _clear_failures_dir(failures_dir)
@@ -612,11 +640,11 @@ def run_scenarios(
     }
 
 
-# ---------- 输出 ----------
+# ---------- Output ----------
 
 
 def _symbols() -> tuple[str, str]:
-    """Windows 控制台编码兜底：emoji 编码不了就退回 [PASS]/[FAIL]。"""
+    """Windows console encoding fallback: drop to [PASS]/[FAIL] if emoji cannot encode."""
     encoding = getattr(sys.stdout, "encoding", None) or "ascii"
     try:
         "✅❌".encode(encoding)
@@ -626,7 +654,7 @@ def _symbols() -> tuple[str, str]:
 
 
 def _safe_print(text: str) -> None:
-    """打印含中文/emoji 的行时不因控制台编码而崩溃。"""
+    """Print lines containing Chinese/emoji without crashing on the console encoding."""
     try:
         print(text)
     except UnicodeEncodeError:
@@ -651,33 +679,37 @@ def print_report(summary: dict, failures_dir: Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="登革热风险服务场景化评测运行器")
-    parser.add_argument("--json", action="store_true", help="输出机器可读 JSON 结果")
+    parser = argparse.ArgumentParser(
+        description="Scenario-based evaluation runner for the dengue risk service"
+    )
+    parser.add_argument(
+        "--json", action="store_true", help="print machine-readable JSON results"
+    )
     parser.add_argument(
         "--only",
         default="",
-        help="只运行指定场景，逗号分隔的 id 列表，如 --only a,b",
+        help="run only the named scenarios, a comma-separated list of ids, e.g. --only a,b",
     )
     parser.add_argument(
         "--scenarios",
         default=str(DEFAULT_SCENARIOS),
-        help="场景文件路径（默认 service/eval/scenarios.json）",
+        help="path to the scenario file (default service/eval/scenarios.json)",
     )
     parser.add_argument(
         "--failures-dir",
         default=str(DEFAULT_FAILURES_DIR),
-        help="失败案例转储目录（默认 service/eval/failures）",
+        help="directory for dumped failure cases (default service/eval/failures)",
     )
     args = parser.parse_args(argv)
 
     scenarios_path = Path(args.scenarios)
     if not scenarios_path.is_file():
-        print(f"场景文件不存在：{scenarios_path}", file=sys.stderr)
+        print(f"Scenario file does not exist: {scenarios_path}", file=sys.stderr)
         return 2
     try:
         scenarios = load_scenarios(scenarios_path)
     except (ValueError, json.JSONDecodeError) as exc:
-        print(f"场景文件非法：{exc}", file=sys.stderr)
+        print(f"Invalid scenario file: {exc}", file=sys.stderr)
         return 2
 
     only = [sid.strip() for sid in args.only.split(",") if sid.strip()]

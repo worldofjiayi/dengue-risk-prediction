@@ -1,13 +1,16 @@
-"""流行病学情报工具（app/intel.py）测试。
+"""Tests for the epidemiological intelligence tool (app/intel.py).
 
-三件事必须钉死：
-  1. 别名解析——五种语言的地名写法、常见变体，都要落到同一个规范名上；
-  2. 缓存——12 小时内不许再打 who.int，过期后必须重拉；
-  3. **诚实**——网络失败时返回 lookup_failed=true 且 who_notices=[]，
-     绝不退回「大概是这个链接」。这条是整个工具能被信任的前提。
+Three things have to be nailed down:
+  1. alias resolution -- place names written in five languages, and common variants, must
+     all land on the same canonical name;
+  2. caching -- who.int must not be hit again within 12 hours, and must be re-fetched once
+     the cache has expired;
+  3. **honesty** -- on a network failure the tool returns lookup_failed=true and
+     who_notices=[], and never falls back to "this is probably the link". That is the
+     precondition for the whole tool being trustworthy.
 
-所有测试都不发真实网络请求：要么在 MOCK 模式下走内置数据，要么注入 fetcher /
-替换 httpx.Client。
+No test makes a real network request: either MOCK mode serves the built-in data, or a
+fetcher is injected / httpx.Client is replaced.
 """
 
 import json
@@ -44,7 +47,7 @@ FAKE_ITEMS = [
 
 @pytest.fixture(autouse=True)
 def _clean_cache():
-    """每条测试都从空缓存开始，也不给下一条留残留。"""
+    """Every test starts from an empty cache and leaves no residue for the next one."""
     intel.clear_notice_cache()
     yield
     intel.clear_notice_cache()
@@ -62,7 +65,7 @@ def mock_mode(monkeypatch):
 
 @pytest.fixture()
 def live_mode(monkeypatch):
-    """关掉 MOCK：走真实分支，但网络永远由测试自己替换掉。"""
+    """MOCK off: the real branch, but the network is always replaced by the test itself."""
     monkeypatch.setenv("MOCK_MODE", "false")
     from app.config import get_settings
 
@@ -71,7 +74,7 @@ def live_mode(monkeypatch):
     get_settings.cache_clear()
 
 
-# ---------- 数据文件本身 ----------
+# ---------- The data file itself ----------
 
 
 def test_data_file_shape_and_coverage():
@@ -81,7 +84,7 @@ def test_data_file_shape_and_coverage():
     for name, entry in countries.items():
         assert entry["level"] in VALID_LEVELS, name
         assert entry["season"].strip(), name
-    # 覆盖到高流行带、中等区和常见客源地三类
+    # Covers all three kinds: the high-endemic belt, moderate areas, common origin countries
     assert countries["Brazil"]["level"] == "high"
     assert countries["Indonesia"]["level"] == "high"
     assert countries["Taiwan"]["level"] == "moderate"
@@ -104,7 +107,7 @@ def test_every_alias_points_at_a_real_country():
 
 
 def test_sub_national_notes_where_they_matter():
-    """粗到国家一级会误导的地方，必须在 season 注记里说清楚。"""
+    """Where country-level granularity would mislead, the season note must spell it out."""
     countries = json.loads(DATA_PATH.read_text(encoding="utf-8"))["countries"]
     assert "Guangdong" in countries["China"]["season"]
     assert "Yunnan" in countries["China"]["season"]
@@ -113,7 +116,7 @@ def test_sub_national_notes_where_they_matter():
     assert countries["Northern China"]["level"] == "none"
 
 
-# ---------- 别名解析 ----------
+# ---------- Alias resolution ----------
 
 
 @pytest.mark.parametrize(
@@ -159,18 +162,18 @@ def test_find_location_in_free_text(sentence, expected):
 
 
 def test_longest_alias_wins():
-    """"south korea" 必须压过 "korea"，"el salvador" 压过 "salvador"。"""
+    """"south korea" must beat "korea", and "el salvador" must beat "salvador"."""
     assert intel.find_location("moving to South Korea") == "South Korea"
     assert intel.find_location("a trip to El Salvador") == "El Salvador"
 
 
 def test_word_boundaries_prevent_substring_hits():
-    """别名不能在单词内部命中——'the Americas' 不是 'America'。"""
+    """An alias must not match inside a word -- 'the Americas' is not 'America'."""
     assert intel.find_location("dengue in the Americas is rising") is None
     assert intel.find_location("chinatown noodles") is None
 
 
-# ---------- MOCK 模式：内置数据 ----------
+# ---------- MOCK mode: built-in data ----------
 
 
 @pytest.mark.parametrize(
@@ -202,7 +205,7 @@ PAYLOAD_KEYS = {
 
 
 def test_mock_payload_has_the_documented_shape(mock_mode):
-    """MOCK 是环境，不是另一份契约。"""
+    """MOCK is an environment, not a second contract."""
     assert set(intel.lookup_dengue_context("Brazil")) == PAYLOAD_KEYS
     assert set(intel.lookup_dengue_context("Narnia")) == PAYLOAD_KEYS
 
@@ -213,7 +216,7 @@ def test_live_payload_has_the_same_shape(live_mode):
     assert set(intel.lookup_dengue_context("Narnia", fetcher=lambda: [])) == PAYLOAD_KEYS
 
 
-# ---------- 通报筛选 ----------
+# ---------- Notice selection ----------
 
 
 def test_country_specific_notice_preferred(live_mode):
@@ -227,7 +230,8 @@ def test_falls_back_to_global_notices_newest_first(live_mode):
     result = intel.lookup_dengue_context("Singapore", fetcher=lambda: list(FAKE_ITEMS))
     titles = [n["title"] for n in result["who_notices"]]
     assert titles == ["Dengue - Global situation", "Dengue- Global situation"]
-    # 退回全球通报是安全的：标题本身就写着这是全球形势，不会被当成新加坡的通报
+    # Falling back to global notices is safe: the title itself says this is the global
+    # situation, so it cannot be taken for a notice about Singapore
     assert all("Global" in t for t in titles)
 
 
@@ -250,10 +254,10 @@ def test_items_without_urlname_are_dropped(live_mode):
     broken = [{"Title": "Dengue - Global situation", "PublicationDateAndTime": "2025-01-01T00:00:00Z"}]
     result = intel.lookup_dengue_context("Singapore", fetcher=lambda: broken)
     assert result["who_notices"] == []
-    assert result["lookup_failed"] is False  # 拿到了列表，只是没有可用条目
+    assert result["lookup_failed"] is False  # the list did arrive, it just had no usable items
 
 
-# ---------- 缓存 ----------
+# ---------- Caching ----------
 
 
 def test_cache_prevents_a_second_fetch_within_12h(live_mode):
@@ -283,14 +287,14 @@ def test_cache_expires_after_12h(live_mode):
 
 def test_seeded_cache_is_used(live_mode):
     def boom():
-        raise AssertionError("缓存有效期内不该再发请求")
+        raise AssertionError("no request should be sent while the cache is still valid")
 
     intel.seed_notice_cache(FAKE_ITEMS, fetched_at=5000.0)
     result = intel.lookup_dengue_context("Brazil", now=5001.0, fetcher=boom)
     assert result["who_notices"][0]["title"] == "Dengue - Brazil"
 
 
-# ---------- 诚实的失败 ----------
+# ---------- Honest failure ----------
 
 
 def test_network_failure_reports_lookup_failed_and_no_notices(live_mode, monkeypatch):
@@ -312,7 +316,7 @@ def test_network_failure_reports_lookup_failed_and_no_notices(live_mode, monkeyp
 
     assert result["lookup_failed"] is True
     assert result["who_notices"] == []
-    # 地区表是本地的，网络挂了它照样能答
+    # The endemicity table is local, so it still answers when the network is down
     assert result["matched"] is True
     assert result["endemicity"] == "high"
     assert result["season_note"]
@@ -349,7 +353,7 @@ def test_malformed_payload_is_a_failure(live_mode):
 
 
 def test_failed_fetch_is_not_cached(live_mode):
-    """失败不该被缓存成 12 小时的沉默：下一次还要再试。"""
+    """A failure must not be cached into 12 hours of silence: the next call tries again."""
     attempts = []
 
     def flaky():
@@ -365,7 +369,7 @@ def test_failed_fetch_is_not_cached(live_mode):
     assert len(attempts) == 2
 
 
-# ---------- 工具契约 ----------
+# ---------- Tool contract ----------
 
 
 def test_tool_name_is_shared_by_every_layer():

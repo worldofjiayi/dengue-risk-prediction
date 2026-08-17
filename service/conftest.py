@@ -1,4 +1,4 @@
-# pytest 根 conftest：确保项目根目录在 sys.path 中，使 tests 能 import app 包
+# Root pytest conftest: keep the project root on sys.path so tests can import the app package
 import sys
 from pathlib import Path
 
@@ -11,8 +11,9 @@ if ROOT not in sys.path:
 
 @pytest.fixture(autouse=True)
 def _eval_log_to_tmp(monkeypatch, tmp_path):
-    """测试默认把评测回流写到临时目录，避免污染项目 data/ 目录。
+    """By default, send the evaluation feedback log to a temp directory during tests,
+    so the project's data/ directory is not polluted.
 
-    单个测试可再用 monkeypatch.setenv("EVAL_LOG_PATH", ...) 覆盖。
+    An individual test can still override this with monkeypatch.setenv("EVAL_LOG_PATH", ...).
     """
     monkeypatch.setenv("EVAL_LOG_PATH", str(tmp_path / "assessments.jsonl"))
