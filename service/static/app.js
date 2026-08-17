@@ -42,6 +42,16 @@ const EXPOSURE_CODES = ['FEVER_CLUSTER', 'CONFIRMED_CASE', 'OUTBREAK_TRAVEL'];
 // 三态作答的字段类别（用于计数、批量填「无」等通用逻辑）
 const TRI_KINDS = ['symptoms', 'comorbidities', 'exposure'];
 
+// 智能问诊（自适应模式）：
+// - VOMITO / PETEQUIA_N 是 WHO 警示征象，人人必问（安全阶段）
+// - 自适应环节最多问 ADAPTIVE_CAP 题
+// - /api/plan 超过 PLAN_TIMEOUT_MS 或出错就静默退回完整问卷
+const SAFETY_CODES = ['VOMITO', 'PETEQUIA_N'];
+const ADAPTIVE_STAGES = ['basic', 'safety', 'exposure', 'loop', 'notes'];
+const ADAPTIVE_CAP = 12;
+const PLAN_TIMEOUT_MS = 6000;
+const PLAN_KIND_MAP = { symptom: 'symptoms', comorbidity: 'comorbidities' };
+
 // 模型贡献项里 5 个非二值特征（code 保留原名，不带 _x）
 const NON_BINARY_FEATS = ['age', 'sex_f', 'day_ill', 'wk_sin', 'wk_cos'];
 
@@ -126,6 +136,33 @@ const I18N = {
     },
     nav: { prev: '上一步', next: '下一步', submit: '提交评估' },
     hints: { sexRequired: '请选择性别后继续' },
+    mode: {
+      adaptive: '智能问诊（推荐）',
+      classic: '完整问卷',
+      switch: '选择问诊方式',
+    },
+    adaptive: {
+      stageSafety: '安全筛查',
+      stageSafetySub: '这两个问题每个人都会被问到',
+      stageSafetyNote: '呕吐和皮肤瘀点属于世界卫生组织列出的登革热警示征象，会直接影响就医建议，所以无论之后怎么提问，都会先问每个人这两项。',
+      stageLoop: '智能提问',
+      stageLoopSub: '每次只问最有价值的一题，结论一旦确定就停止',
+      questionCounter: '第 {n} 题',
+      whyFor: {
+        dengue: '主要为了判断「登革热可能性」',
+        worsening: '主要为了判断「病情加重风险」',
+        severe: '主要为了判断「重症风险」',
+      },
+      trackTitle: '三项结论的可能范围',
+      trackHint: '色带表示评分仍可能落入的区间，每答一题就会收窄；圆点是当前估计。',
+      decided: '已确定',
+      stopProven: '剩余问题不会再改变任何结论，可以出结果了。',
+      stopCap: '已达到问题数上限，可以出结果了。',
+      stopNoMore: '没有更多值得问的问题了，可以出结果了。',
+      continueFull: '补充更多问题（转完整问卷）',
+      resultReady: '信息已足够',
+      keyHint: '也可以按键盘 1 / 2 / 3 作答',
+    },
     loading: {
       steps: ['正在整理你的作答…', '模型评估中…', '正在生成个性化建议…'],
       sub: '请稍候，通常不超过 10 秒',
@@ -295,6 +332,33 @@ const I18N = {
     },
     nav: { prev: '上一步', next: '下一步', submit: '送出評估' },
     hints: { sexRequired: '請先選擇性別再繼續' },
+    mode: {
+      adaptive: '智慧問診（推薦）',
+      classic: '完整問卷',
+      switch: '選擇問診方式',
+    },
+    adaptive: {
+      stageSafety: '安全篩檢',
+      stageSafetySub: '這兩個問題每個人都會被問到',
+      stageSafetyNote: '嘔吐和皮膚瘀點屬於世界衛生組織列出的登革熱警示徵象，會直接影響就醫建議，因此無論之後怎麼提問，都會先詢問每個人這兩項。',
+      stageLoop: '智慧提問',
+      stageLoopSub: '每次只問最有價值的一題，結論一旦確定就停止',
+      questionCounter: '第 {n} 題',
+      whyFor: {
+        dengue: '主要為了判斷「登革熱可能性」',
+        worsening: '主要為了判斷「病情加重風險」',
+        severe: '主要為了判斷「重症風險」',
+      },
+      trackTitle: '三項結論的可能範圍',
+      trackHint: '色帶表示評分仍可能落入的區間，每答一題就會收窄；圓點是目前的估計。',
+      decided: '已確定',
+      stopProven: '剩餘問題不會再改變任何結論，可以出結果了。',
+      stopCap: '已達到問題數上限，可以出結果了。',
+      stopNoMore: '沒有更多值得問的問題了，可以出結果了。',
+      continueFull: '補充更多問題（轉完整問卷）',
+      resultReady: '資訊已足夠',
+      keyHint: '也可以按鍵盤 1 / 2 / 3 作答',
+    },
     loading: {
       steps: ['正在整理你的作答…', '模型評估中…', '正在產生個人化建議…'],
       sub: '請稍候，通常不超過 10 秒',
@@ -464,6 +528,33 @@ const I18N = {
     },
     nav: { prev: 'Back', next: 'Next', submit: 'Get my result' },
     hints: { sexRequired: 'Please select your sex to continue' },
+    mode: {
+      adaptive: 'Smart interview (recommended)',
+      classic: 'Full questionnaire',
+      switch: 'Choose how questions are asked',
+    },
+    adaptive: {
+      stageSafety: 'Safety check',
+      stageSafetySub: 'Everyone is asked these two questions',
+      stageSafetyNote: 'Vomiting and petechiae are dengue warning signs listed by the World Health Organization and directly affect the care advice, so they are asked of everyone before anything else.',
+      stageLoop: 'Smart questions',
+      stageLoopSub: 'One high-value question at a time — it stops as soon as the conclusions are settled',
+      questionCounter: 'Question {n}',
+      whyFor: {
+        dengue: 'mainly to pin down “Dengue likelihood”',
+        worsening: 'mainly to pin down “Risk of worsening”',
+        severe: 'mainly to pin down “Severe-disease risk”',
+      },
+      trackTitle: 'Possible range of each conclusion',
+      trackHint: 'Each band is the range the score can still fall in — it narrows with every answer. The dot is the current estimate.',
+      decided: 'Settled',
+      stopProven: 'The remaining questions cannot change any conclusion — your result is ready.',
+      stopCap: 'Question limit reached — your result is ready.',
+      stopNoMore: 'No further questions are worth asking — your result is ready.',
+      continueFull: 'Answer more questions (full questionnaire)',
+      resultReady: 'Enough information collected',
+      keyHint: 'You can also press 1 / 2 / 3 on your keyboard',
+    },
     loading: {
       steps: ['Organising your answers…', 'Running the model…', 'Preparing your advice…'],
       sub: 'This usually takes less than 10 seconds',
@@ -633,6 +724,33 @@ const I18N = {
     },
     nav: { prev: 'Atrás', next: 'Siguiente', submit: 'Ver mi resultado' },
     hints: { sexRequired: 'Seleccione su sexo para continuar' },
+    mode: {
+      adaptive: 'Entrevista inteligente (recomendada)',
+      classic: 'Cuestionario completo',
+      switch: 'Elegir el modo de preguntas',
+    },
+    adaptive: {
+      stageSafety: 'Preguntas de seguridad',
+      stageSafetySub: 'Estas dos preguntas se hacen a todas las personas',
+      stageSafetyNote: 'Los vómitos y las petequias son signos de alarma del dengue según la Organización Mundial de la Salud y afectan directamente a las recomendaciones de atención, por eso se preguntan a todas las personas antes que nada.',
+      stageLoop: 'Preguntas inteligentes',
+      stageLoopSub: 'Una pregunta de alto valor cada vez; se detiene en cuanto las conclusiones quedan definidas',
+      questionCounter: 'Pregunta {n}',
+      whyFor: {
+        dengue: 'principalmente para precisar la «probabilidad relativa de dengue»',
+        worsening: 'principalmente para precisar el «riesgo de empeoramiento»',
+        severe: 'principalmente para precisar el «riesgo de gravedad»',
+      },
+      trackTitle: 'Rango posible de cada conclusión',
+      trackHint: 'Cada banda es el rango en el que aún puede caer la puntuación; se estrecha con cada respuesta. El punto es la estimación actual.',
+      decided: 'Definido',
+      stopProven: 'Las preguntas restantes ya no pueden cambiar ninguna conclusión: su resultado está listo.',
+      stopCap: 'Se alcanzó el límite de preguntas: su resultado está listo.',
+      stopNoMore: 'No quedan preguntas que valga la pena hacer: su resultado está listo.',
+      continueFull: 'Responder más preguntas (cuestionario completo)',
+      resultReady: 'Información suficiente',
+      keyHint: 'También puede pulsar 1 / 2 / 3 en el teclado',
+    },
     loading: {
       steps: ['Organizando sus respuestas…', 'Ejecutando el modelo…', 'Preparando sus recomendaciones…'],
       sub: 'Normalmente tarda menos de 10 segundos',
@@ -802,6 +920,33 @@ const I18N = {
     },
     nav: { prev: 'Voltar', next: 'Avançar', submit: 'Ver meu resultado' },
     hints: { sexRequired: 'Selecione o sexo para continuar' },
+    mode: {
+      adaptive: 'Entrevista inteligente (recomendada)',
+      classic: 'Questionário completo',
+      switch: 'Escolher o modo das perguntas',
+    },
+    adaptive: {
+      stageSafety: 'Perguntas de segurança',
+      stageSafetySub: 'Estas duas perguntas são feitas a todas as pessoas',
+      stageSafetyNote: 'Vômito e petéquias são sinais de alarme da dengue listados pela Organização Mundial da Saúde e afetam diretamente as orientações de atendimento, por isso são perguntados a todas as pessoas antes de qualquer outra coisa.',
+      stageLoop: 'Perguntas inteligentes',
+      stageLoopSub: 'Uma pergunta de alto valor por vez; para assim que as conclusões estiverem definidas',
+      questionCounter: 'Pergunta {n}',
+      whyFor: {
+        dengue: 'principalmente para precisar a «probabilidade relativa de dengue»',
+        worsening: 'principalmente para precisar o «risco de piora»',
+        severe: 'principalmente para precisar o «risco de gravidade»',
+      },
+      trackTitle: 'Faixa possível de cada conclusão',
+      trackHint: 'Cada faixa é o intervalo em que a pontuação ainda pode cair; ela se estreita a cada resposta. O ponto é a estimativa atual.',
+      decided: 'Definido',
+      stopProven: 'As perguntas restantes já não podem mudar nenhuma conclusão: seu resultado está pronto.',
+      stopCap: 'Limite de perguntas atingido: seu resultado está pronto.',
+      stopNoMore: 'Não há mais perguntas que valham a pena: seu resultado está pronto.',
+      continueFull: 'Responder mais perguntas (questionário completo)',
+      resultReady: 'Informações suficientes',
+      keyHint: 'Você também pode pressionar 1 / 2 / 3 no teclado',
+    },
     loading: {
       steps: ['Organizando suas respostas…', 'Executando o modelo…', 'Preparando suas orientações…'],
       sub: 'Normalmente leva menos de 10 segundos',
@@ -934,10 +1079,35 @@ function freshChat() {
   return { messages: [], sending: false };
 }
 
+/**
+ * 「已作答」标记，独立于 answers 的取值：
+ * answers 里所有三态题默认就是 'unknown'，无法区分「用户明确选了不知道」
+ * 和「压根没问过」。/api/plan 的契约是：出现的键 = 已作答（yes/no/unknown
+ * 都算），缺席的键 = 还没问 —— 所以必须单独记录。
+ */
+function freshAnsweredSet() {
+  return { symptoms: {}, comorbidities: {}, exposure: {} };
+}
+
+function freshAdaptive() {
+  return {
+    stage: 'basic',    // basic → safety → exposure → loop → notes
+    current: null,     // 当前问题 { kind, code, why }
+    loopCount: 0,      // 自适应环节已答题数（不含安全/暴露阶段）
+    bounds: null,      // 最近一次 /api/plan 的 bounds
+    stopReason: null,  // 'proven' | 'cap' | 'nomore'
+    planning: false,   // /api/plan 请求进行中
+    planSeq: 0,        // 请求序号，丢弃过期响应
+  };
+}
+
 const state = {
   lang: DEFAULT_LANG,
+  mode: 'adaptive', // 'adaptive' | 'classic'，init 里读 localStorage
   step: 0,
   answers: freshAnswers(),
+  answered: freshAnsweredSet(),
+  adaptive: freshAdaptive(),
   submitting: false,
   // 三个贡献项面板的展开状态（切换语言后要保留）
   openExplain: { dengue: false, worsening: false, severe: false },
@@ -996,6 +1166,20 @@ function persistLang(code) {
   try { localStorage.setItem('lang', code); } catch (_) { /* 忽略 */ }
 }
 
+function detectMode() {
+  let saved = null;
+  try { saved = localStorage.getItem('mode'); } catch (_) { /* 忽略 */ }
+  return saved === 'classic' || saved === 'adaptive' ? saved : 'adaptive';
+}
+
+function persistMode(mode) {
+  try { localStorage.setItem('mode', mode); } catch (_) { /* 忽略 */ }
+}
+
+function markAnswered(kind, code) {
+  if (state.answered[kind]) state.answered[kind][code] = true;
+}
+
 /* --------------------------------------------------------- 视图切换 */
 
 const VIEWS = ['hero', 'wizard', 'loading', 'result'];
@@ -1043,6 +1227,9 @@ function setLanguage(code) {
   $('wizard-brand').textContent = t.brand;
   $('btn-prev').textContent = t.nav.prev;
   document.querySelector('.progress').setAttribute('aria-label', t.a11y.progress);
+  $('mode-adaptive').textContent = t.mode.adaptive;
+  $('mode-classic').textContent = t.mode.classic;
+  $('mode-toggle').setAttribute('aria-label', t.mode.switch);
 
   // Loading
   $('loading-sub').textContent = t.loading.sub;
@@ -1084,8 +1271,8 @@ function setLanguage(code) {
   $('disclaimer-bar').textContent =
     (lastResult && lastResult.disclaimer) || t.disclaimer;
 
-  // 重渲染动态内容
-  if (!$('view-wizard').hidden) renderStep(null);
+  // 重渲染动态内容（智能/完整两种模式各自恢复当前进度）
+  if (!$('view-wizard').hidden) renderWizard(null);
   if (!$('view-result').hidden && lastResult) renderResult(lastResult, { animate: false });
   if (!$('error-overlay').hidden && lastError) renderError();
   renderChatChips();
@@ -1133,12 +1320,13 @@ function makeTriRow(kind, code) {
     btn.setAttribute('aria-pressed', on ? 'true' : 'false');
     btn.addEventListener('click', () => {
       state.answers[kind][code] = value;
+      markAnswered(kind, code);
       opts.querySelectorAll('.q-opt').forEach((b) => {
         const sel = b.dataset.value === value;
         b.classList.toggle('is-on', sel);
         b.setAttribute('aria-pressed', sel ? 'true' : 'false');
       });
-      updateStepMeta();
+      updateWizardMeta();
     });
     opts.appendChild(btn);
   });
@@ -1323,7 +1511,10 @@ function renderStep(direction) {
     bulk.className = 'bulk-btn';
     bulk.textContent = t.bulkNo;
     bulk.addEventListener('click', () => {
-      step.codes.forEach((c) => { state.answers[step.kind][c] = 'no'; });
+      step.codes.forEach((c) => {
+        state.answers[step.kind][c] = 'no';
+        markAnswered(step.kind, c);
+      });
       renderStep(null);
     });
     wrap.appendChild(bulk);
@@ -1338,7 +1529,9 @@ function renderStep(direction) {
   updateStepMeta();
   hideHint();
 
-  // 导航按钮
+  // 导航按钮（智能模式可能隐藏过，这里恢复完整问卷的形态）
+  document.querySelector('.wizard-nav').hidden = false;
+  $('btn-prev').hidden = false;
   $('btn-prev').disabled = state.step === 0;
   const isLast = state.step === STEPS.length - 1;
   $('btn-next').textContent = isLast ? t.nav.submit : t.nav.next;
@@ -1401,6 +1594,549 @@ function validateStep() {
 function goStep(index, direction) {
   state.step = Math.max(0, Math.min(STEPS.length - 1, index));
   renderStep(direction);
+}
+
+/* --------------------------------------------------------- 智能问诊（自适应模式） */
+/*
+ * /api/plan 契约：请求里只放「已作答」的题（yes/no/unknown 都算作答，
+ * 没问过的键必须缺席）；响应给出三个模型的评分上下界 bounds、can_stop、
+ * 以及最多 5 个候选下一题 next。任何失败（含 6 秒超时、404）都静默退回
+ * 完整问卷，已答内容全部带过去 —— 智能模式只是增强，绝不能挡住用户。
+ */
+
+function renderWizard(direction) {
+  if (state.mode === 'adaptive') renderAdaptive(direction);
+  else renderStep(direction);
+}
+
+function updateWizardMeta() {
+  if (state.mode === 'adaptive') updateAdaptiveMeta();
+  else updateStepMeta();
+}
+
+function updateModeToggle() {
+  const on = state.mode === 'adaptive';
+  const a = $('mode-adaptive');
+  const c = $('mode-classic');
+  a.classList.toggle('is-on', on);
+  a.setAttribute('aria-pressed', on ? 'true' : 'false');
+  c.classList.toggle('is-on', !on);
+  c.setAttribute('aria-pressed', on ? 'false' : 'true');
+}
+
+/**
+ * 切换问诊模式。答案完全共享：完整问卷显示已答内容，切回智能模式重新规划。
+ * opts.persist=false 用于静默回退（不是用户的主动选择，不写入偏好）。
+ */
+function setMode(mode, opts) {
+  if (mode !== 'adaptive' && mode !== 'classic') mode = 'adaptive';
+  state.mode = mode;
+  if (!opts || opts.persist !== false) persistMode(mode);
+  updateModeToggle();
+  if ($('view-wizard').hidden) return;
+  if (mode === 'adaptive') enterAdaptive();
+  else renderStep(null);
+}
+
+/** 根据已答内容决定进入智能模式的哪个阶段。 */
+function computeAdaptiveStage() {
+  if (!state.answers.sex) return 'basic';
+  if (!SAFETY_CODES.every((c) => state.answered.symptoms[c])) return 'safety';
+  if (!EXPOSURE_CODES.every((c) => state.answered.exposure[c])) return 'exposure';
+  return 'loop';
+}
+
+function enterAdaptive() {
+  const ad = state.adaptive;
+  ad.stage = computeAdaptiveStage();
+  ad.current = null;
+  ad.stopReason = null;
+  renderAdaptive(null);
+  if (ad.stage === 'loop') advancePlan();
+}
+
+/** /api/plan 请求体：只包含用户真正作答过的题。 */
+function buildPlanPayload() {
+  const a = state.answers;
+  const symptoms = {};
+  SYMPTOM_CODES.forEach((c) => {
+    if (state.answered.symptoms[c]) symptoms[c] = a.symptoms[c];
+  });
+  const comorbidities = {};
+  COMORB_CODES.forEach((c) => {
+    if (state.answered.comorbidities[c]) comorbidities[c] = a.comorbidities[c];
+  });
+  return {
+    age: a.age,
+    sex: a.sex,
+    day_ill: a.dayIll,
+    symptoms,
+    comorbidities,
+    language: state.lang,
+  };
+}
+
+async function fetchPlan() {
+  const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), PLAN_TIMEOUT_MS) : null;
+  try {
+    const resp = await fetch('/api/plan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(buildPlanPayload()),
+      signal: ctrl ? ctrl.signal : undefined,
+    });
+    if (!resp.ok) throw new Error(`plan status ${resp.status}`);
+    const data = await resp.json();
+    if (!data || typeof data !== 'object' || !data.bounds) throw new Error('plan bad data');
+    return data;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/** 从 next 里挑第一个我们认识、且还没答过的问题。 */
+function pickNext(plan) {
+  const list = Array.isArray(plan.next) ? plan.next : [];
+  for (let i = 0; i < list.length; i += 1) {
+    const it = list[i];
+    if (!it || typeof it !== 'object') continue;
+    const kind = PLAN_KIND_MAP[it.kind];
+    if (!kind) continue;
+    const code = String(it.code || '');
+    const known = kind === 'symptoms' ? SYMPTOM_CODES : COMORB_CODES;
+    if (known.indexOf(code) === -1) continue;
+    if (state.answered[kind][code]) continue;
+    return {
+      kind,
+      code,
+      why: METRICS.indexOf(it.why_model) !== -1 ? it.why_model : null,
+    };
+  }
+  return null;
+}
+
+function stepHead(title, subText) {
+  const head = document.createElement('header');
+  head.className = 'step-head';
+  const h2 = document.createElement('h2');
+  h2.className = 'step-title';
+  h2.tabIndex = -1;
+  h2.textContent = title;
+  const sub = document.createElement('p');
+  sub.className = 'step-sub';
+  sub.textContent = subText;
+  head.append(h2, sub);
+  return head;
+}
+
+/** 三条「区间收窄」轨道（dengue / worsening / severe）。 */
+function buildTracksBlock(title, hint) {
+  const t = T();
+  const wrap = document.createElement('div');
+  wrap.className = 'nr-wrap';
+
+  const h = document.createElement('p');
+  h.className = 'nr-title';
+  h.textContent = title;
+  wrap.appendChild(h);
+
+  if (hint) {
+    const p = document.createElement('p');
+    p.className = 'nr-hint';
+    p.textContent = hint;
+    wrap.appendChild(p);
+  }
+
+  const list = document.createElement('div');
+  list.className = 'nr-tracks';
+  METRICS.forEach((m) => {
+    const track = document.createElement('div');
+    track.className = 'nr-track';
+    track.id = `nr-${m}`;
+
+    const head = document.createElement('div');
+    head.className = 'nr-head';
+    const name = document.createElement('span');
+    name.className = 'nr-name';
+    name.textContent = t.result[m];
+    const val = document.createElement('span');
+    val.className = 'nr-val';
+    const now = document.createElement('span');
+    now.className = 'nr-now';
+    now.id = `nr-now-${m}`;
+    now.textContent = '—';
+    const tag = document.createElement('span');
+    tag.className = 'nr-tag';
+    tag.id = `nr-tag-${m}`;
+    tag.textContent = `✓ ${t.adaptive.decided}`;
+    tag.hidden = true;
+    val.append(now, tag);
+    head.append(name, val);
+
+    const bar = document.createElement('div');
+    bar.className = 'nr-bar';
+    const band = document.createElement('span');
+    band.className = 'nr-band';
+    band.id = `nr-band-${m}`;
+    band.style.left = '0%';
+    band.style.width = '100%';
+    const marker = document.createElement('span');
+    marker.className = 'nr-marker';
+    marker.id = `nr-marker-${m}`;
+    marker.hidden = true;
+    bar.append(band, marker);
+
+    track.append(head, bar);
+    list.appendChild(track);
+  });
+  wrap.appendChild(list);
+  return wrap;
+}
+
+/** 用最新 bounds 更新轨道：色带位置/宽度靠 CSS 过渡自然收窄。 */
+function updateTracks(bounds) {
+  if (!bounds || typeof bounds !== 'object') return;
+  const clamp = (v) => Math.max(0, Math.min(100, Number(v) || 0));
+  METRICS.forEach((m) => {
+    const b = bounds[m];
+    const track = $(`nr-${m}`);
+    if (!track || !b || typeof b !== 'object') return;
+
+    const now = clamp(b.score_now);
+    const lo = Math.min(clamp(b.score_min), now);
+    const hi = Math.max(clamp(b.score_max), now);
+    const decided = b.decided === true;
+
+    track.classList.remove('lv-low', 'lv-medium', 'lv-high');
+    if (['low', 'medium', 'high'].indexOf(b.level_now) !== -1) {
+      track.classList.add(`lv-${b.level_now}`);
+    }
+    track.classList.toggle('is-decided', decided);
+
+    const band = $(`nr-band-${m}`);
+    if (band) {
+      // 已确定：色带收拢到当前值上（宽度归零 + 淡出），只留圆点
+      band.style.left = `${decided ? now : lo}%`;
+      band.style.width = `${decided ? 0 : Math.max(0, hi - lo)}%`;
+    }
+    const marker = $(`nr-marker-${m}`);
+    if (marker) {
+      marker.hidden = false;
+      marker.style.left = `${now}%`;
+    }
+    const nowEl = $(`nr-now-${m}`);
+    if (nowEl) nowEl.textContent = now.toFixed(1);
+    const tag = $(`nr-tag-${m}`);
+    if (tag) tag.hidden = !decided;
+  });
+}
+
+/** 渲染当前问题卡片；没有问题时按 planning 状态显示加载点或留空。 */
+function renderQuestion(focusQuestion) {
+  const host = $('aq-host');
+  if (!host) return;
+  const t = T();
+  const ad = state.adaptive;
+
+  if (!ad.current) {
+    if (ad.planning) {
+      const load = document.createElement('div');
+      load.className = 'aq-loading';
+      for (let i = 0; i < 3; i += 1) {
+        const dot = document.createElement('span');
+        dot.className = 'dot';
+        dot.setAttribute('aria-hidden', 'true');
+        load.appendChild(dot);
+      }
+      host.replaceChildren(load);
+    } else {
+      host.replaceChildren();
+    }
+    return;
+  }
+
+  const q = ad.current;
+  const info = itemText(q.kind, q.code);
+
+  const card = document.createElement('div');
+  card.className = 'aq-card';
+
+  const meta = document.createElement('p');
+  meta.className = 'aq-meta';
+  let metaText = fmt(t.adaptive.questionCounter, { n: ad.loopCount + 1 });
+  if (q.why && t.adaptive.whyFor[q.why]) metaText += ` · ${t.adaptive.whyFor[q.why]}`;
+  meta.textContent = metaText;
+  card.appendChild(meta);
+
+  const label = document.createElement('h3');
+  label.className = 'aq-label';
+  label.tabIndex = -1;
+  label.textContent = info.label;
+  card.appendChild(label);
+
+  if (info.desc) {
+    const desc = document.createElement('p');
+    desc.className = 'aq-desc';
+    desc.textContent = info.desc;
+    card.appendChild(desc);
+  }
+
+  const opts = document.createElement('div');
+  opts.className = 'aq-opts';
+  opts.setAttribute('role', 'group');
+  opts.setAttribute('aria-label', info.label);
+  ['yes', 'no', 'unknown'].forEach((value) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `aq-opt aq-opt-${value}`;
+    btn.textContent = t.answers[value];
+    btn.addEventListener('click', () => answerCurrent(value));
+    opts.appendChild(btn);
+  });
+  card.appendChild(opts);
+
+  const keys = document.createElement('p');
+  keys.className = 'aq-keys';
+  keys.textContent = t.adaptive.keyHint;
+  card.appendChild(keys);
+
+  host.replaceChildren(card);
+  if (focusQuestion) label.focus({ preventScroll: true });
+}
+
+function setQuestionBusy(busy) {
+  document.querySelectorAll('.aq-opt').forEach((b) => { b.disabled = busy; });
+}
+
+/** 回答当前问题（点击或按键 1/2/3），然后重新规划。 */
+function answerCurrent(value) {
+  const ad = state.adaptive;
+  if (ad.stage !== 'loop' || !ad.current || ad.planning) return;
+  const q = ad.current;
+  state.answers[q.kind][q.code] = value;
+  markAnswered(q.kind, q.code);
+  ad.loopCount += 1;
+  // 注意：current 保留到新计划到达，旧卡片禁用即可，避免闪加载点
+  advancePlan();
+}
+
+/** 请求 /api/plan 并推进流程：更新轨道 → 停止或展示下一题。 */
+async function advancePlan() {
+  const ad = state.adaptive;
+  ad.planSeq += 1;
+  const seq = ad.planSeq;
+  ad.planning = true;
+  setQuestionBusy(true);
+  if (!ad.current) renderQuestion(false); // 刚进入循环：显示加载点
+
+  let plan = null;
+  try {
+    plan = await fetchPlan();
+  } catch (_) {
+    // /api/plan 不可用（404、超时、格式异常……）：静默退回完整问卷
+    if (state.adaptive === ad && seq === ad.planSeq) {
+      ad.planning = false;
+      if (state.mode === 'adaptive' && ad.stage === 'loop') fallbackToClassic();
+    }
+    return;
+  }
+
+  // 丢弃过期响应（期间用户重置、切换了模式或语言重新请求过）
+  if (state.adaptive !== ad || seq !== ad.planSeq) return;
+  ad.planning = false;
+  if (state.mode !== 'adaptive' || ad.stage !== 'loop') return;
+
+  if (plan.bounds && typeof plan.bounds === 'object') ad.bounds = plan.bounds;
+  updateTracks(ad.bounds);
+
+  const q = pickNext(plan);
+  if (plan.can_stop === true) { stopLoop('proven'); return; }
+  if (ad.loopCount >= ADAPTIVE_CAP) { stopLoop('cap'); return; }
+  if (!q) { stopLoop('nomore'); return; }
+
+  ad.current = q;
+  renderQuestion(true);
+}
+
+function stopLoop(reason) {
+  const ad = state.adaptive;
+  ad.stopReason = reason;
+  ad.current = null;
+  ad.stage = 'notes';
+  renderAdaptive('forward');
+}
+
+/** 智能模式失败时的静默降级：保留全部已答内容，转完整问卷。 */
+function fallbackToClassic() {
+  state.adaptive.current = null;
+  state.adaptive.planning = false;
+  if (state.answers.sex) state.step = Math.max(state.step, 1);
+  setMode('classic', { persist: false });
+}
+
+function adaptiveNext() {
+  const ad = state.adaptive;
+  if (ad.stage === 'basic') {
+    if (!state.answers.sex) { showHint(T().hints.sexRequired); return; }
+    ad.stage = 'safety';
+    renderAdaptive('forward');
+  } else if (ad.stage === 'safety') {
+    ad.stage = 'exposure';
+    renderAdaptive('forward');
+  } else if (ad.stage === 'exposure') {
+    ad.stage = 'loop';
+    ad.current = null;
+    ad.stopReason = null;
+    renderAdaptive('forward');
+    advancePlan();
+  } else if (ad.stage === 'notes') {
+    submit();
+  }
+}
+
+function adaptivePrev() {
+  const ad = state.adaptive;
+  if (ad.stage === 'safety') {
+    ad.stage = 'basic';
+    renderAdaptive('back');
+  } else if (ad.stage === 'exposure') {
+    ad.stage = 'safety';
+    renderAdaptive('back');
+  }
+}
+
+function updateAdaptiveMeta() {
+  const t = T();
+  const ad = state.adaptive;
+  const idx = Math.max(0, ADAPTIVE_STAGES.indexOf(ad.stage));
+  const total = ADAPTIVE_STAGES.length;
+  const cur = idx + 1;
+
+  let counter = fmt(t.stepCounter, { cur, total });
+  let codes = null;
+  let kind = null;
+  if (ad.stage === 'safety') { codes = SAFETY_CODES; kind = 'symptoms'; }
+  else if (ad.stage === 'exposure') { codes = EXPOSURE_CODES; kind = 'exposure'; }
+  if (codes) {
+    const done = codes.filter((c) => state.answered[kind][c]).length;
+    counter += ` · ${fmt(t.answered, { n: done, total: codes.length })}`;
+  }
+  $('step-counter').textContent = counter;
+
+  $('progress-fill').style.width = `${(cur / total) * 100}%`;
+  const bar = document.querySelector('.progress');
+  bar.setAttribute('aria-valuenow', String(cur));
+  bar.setAttribute('aria-valuemax', String(total));
+
+  const dots = $('progress-steps');
+  dots.replaceChildren(...ADAPTIVE_STAGES.map((s, i) => {
+    const dot = document.createElement('span');
+    dot.className = 'progress-dot';
+    if (i < cur) dot.classList.add('is-done');
+    if (i === idx) dot.classList.add('is-current');
+    return dot;
+  }));
+}
+
+/** 渲染智能模式当前阶段（语言切换时也走这里，状态全部保留）。 */
+function renderAdaptive(direction) {
+  const t = T();
+  const ad = state.adaptive;
+  const panel = $('wizard-panel');
+
+  const wrap = document.createElement('div');
+  wrap.className = 'step';
+  if (direction === 'forward') wrap.classList.add('slide-in-right');
+  else if (direction === 'back') wrap.classList.add('slide-in-left');
+
+  let head = null;
+
+  if (ad.stage === 'basic') {
+    head = stepHead(t.steps.basic.title, t.steps.basic.sub);
+    wrap.appendChild(head);
+    renderBasicStep(wrap);
+  } else if (ad.stage === 'safety') {
+    head = stepHead(t.adaptive.stageSafety, t.adaptive.stageSafetySub);
+    wrap.appendChild(head);
+    const note = document.createElement('p');
+    note.className = 'step-note';
+    note.textContent = t.adaptive.stageSafetyNote;
+    wrap.appendChild(note);
+    const list = document.createElement('div');
+    list.className = 'q-list';
+    SAFETY_CODES.forEach((code) => list.appendChild(makeTriRow('symptoms', code)));
+    wrap.appendChild(list);
+  } else if (ad.stage === 'exposure') {
+    // 与完整问卷第 5 步完全同源：同样的 code、文案与说明
+    head = stepHead(t.steps.exposure.title, t.steps.exposure.sub);
+    wrap.appendChild(head);
+    const note = document.createElement('p');
+    note.className = 'step-note';
+    note.textContent = t.exposureNote;
+    wrap.appendChild(note);
+    const list = document.createElement('div');
+    list.className = 'q-list';
+    EXPOSURE_CODES.forEach((code) => list.appendChild(makeTriRow('exposure', code)));
+    wrap.appendChild(list);
+  } else if (ad.stage === 'loop') {
+    head = stepHead(t.adaptive.stageLoop, t.adaptive.stageLoopSub);
+    wrap.appendChild(head);
+    wrap.appendChild(buildTracksBlock(t.adaptive.trackTitle, t.adaptive.trackHint));
+    const host = document.createElement('div');
+    host.id = 'aq-host';
+    wrap.appendChild(host);
+  } else {
+    // notes：停止原因 + 最终区间 + 补充说明 + 转完整问卷的入口
+    head = stepHead(t.steps.notes.title, t.steps.notes.sub);
+    wrap.appendChild(head);
+    if (ad.stopReason) {
+      const stop = document.createElement('p');
+      stop.className = 'stop-line';
+      const mark = document.createElement('span');
+      mark.className = 'stop-mark';
+      mark.setAttribute('aria-hidden', 'true');
+      mark.textContent = '✓';
+      const key = ad.stopReason === 'cap' ? 'stopCap'
+        : ad.stopReason === 'nomore' ? 'stopNoMore' : 'stopProven';
+      stop.append(mark, document.createTextNode(t.adaptive[key]));
+      wrap.appendChild(stop);
+    }
+    if (ad.bounds) wrap.appendChild(buildTracksBlock(t.adaptive.resultReady, null));
+    renderNotesStep(wrap);
+    const more = document.createElement('p');
+    more.className = 'aq-more';
+    const moreBtn = document.createElement('button');
+    moreBtn.type = 'button';
+    moreBtn.className = 'link-btn';
+    moreBtn.textContent = t.adaptive.continueFull;
+    moreBtn.addEventListener('click', () => {
+      // 想再补答就转完整问卷；这不是模式偏好，不写入 localStorage
+      if (state.answers.sex) state.step = Math.max(state.step, 1);
+      setMode('classic', { persist: false });
+    });
+    more.appendChild(moreBtn);
+    wrap.appendChild(more);
+  }
+
+  panel.replaceChildren(wrap);
+
+  // 轨道与问题卡片要在 DOM 挂载后再填充（依赖 getElementById）
+  if ((ad.stage === 'loop' || ad.stage === 'notes') && ad.bounds) updateTracks(ad.bounds);
+  if (ad.stage === 'loop') renderQuestion(false);
+
+  updateAdaptiveMeta();
+  hideHint();
+
+  // 导航：循环阶段由答题按钮驱动，隐藏整个导航条
+  const nav = document.querySelector('.wizard-nav');
+  nav.hidden = ad.stage === 'loop';
+  const prev = $('btn-prev');
+  prev.hidden = ad.stage === 'notes';
+  prev.disabled = ad.stage === 'basic';
+  $('btn-next').textContent = ad.stage === 'notes' ? t.nav.submit : t.nav.next;
+
+  if (head) head.querySelector('.step-title').focus({ preventScroll: true });
 }
 
 /* --------------------------------------------------------- 提交 */
@@ -2033,6 +2769,8 @@ async function runChatTurn(question) {
 
 function resetWizard() {
   state.answers = freshAnswers();
+  state.answered = freshAnsweredSet();
+  state.adaptive = freshAdaptive();
   state.chat = freshChat();
   METRICS.forEach((m) => { state.openExplain[m] = false; });
   $('chat-input').value = '';
@@ -2040,10 +2778,13 @@ function resetWizard() {
   updateChatCounter();
   renderChatLog();
   lastResult = null;
-  goStep(0, null);
+  state.step = 0;
+  renderWizard(null);
 }
 
 function init() {
+  state.mode = detectMode();
+  updateModeToggle();
   setLanguage(detectLang());
   updateChatCounter();
 
@@ -2052,14 +2793,37 @@ function init() {
     showView('wizard');
   });
 
+  // 问诊模式切换：智能问诊 / 完整问卷（答案共享，切回智能会重新规划）
+  $('mode-adaptive').addEventListener('click', () => {
+    if (state.mode !== 'adaptive') setMode('adaptive');
+  });
+  $('mode-classic').addEventListener('click', () => {
+    if (state.mode !== 'classic') setMode('classic');
+  });
+
   $('btn-prev').addEventListener('click', () => {
+    if (state.mode === 'adaptive') { adaptivePrev(); return; }
     if (state.step > 0) goStep(state.step - 1, 'back');
   });
 
   $('btn-next').addEventListener('click', () => {
+    if (state.mode === 'adaptive') { adaptiveNext(); return; }
     if (!validateStep()) return;
     if (state.step === STEPS.length - 1) submit();
     else goStep(state.step + 1, 'forward');
+  });
+
+  // 智能模式：键盘 1/2/3 快速作答当前问题
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== '1' && e.key !== '2' && e.key !== '3') return;
+    if ($('view-wizard').hidden || state.mode !== 'adaptive') return;
+    const ad = state.adaptive;
+    if (ad.stage !== 'loop' || !ad.current || ad.planning) return;
+    if (!$('privacy-overlay').hidden || !$('error-overlay').hidden) return;
+    const el = document.activeElement;
+    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+    e.preventDefault();
+    answerCurrent(e.key === '1' ? 'yes' : e.key === '2' ? 'no' : 'unknown');
   });
 
   $('btn-restart').addEventListener('click', () => {

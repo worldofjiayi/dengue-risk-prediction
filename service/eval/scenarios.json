@@ -1,0 +1,1086 @@
+[
+  {
+    "id": "healthy-young-adult",
+    "description": "Healthy 25-year-old male, no symptoms, no comorbidities, no exposure: all three models must stay low with no warning signs.",
+    "endpoint": "assess",
+    "request": {
+      "age": 25,
+      "sex": "M",
+      "day_ill": 0,
+      "symptoms": {
+        "FEBRE": "no",
+        "MIALGIA": "no",
+        "CEFALEIA": "no",
+        "EXANTEMA": "no",
+        "VOMITO": "no",
+        "NAUSEA": "no",
+        "DOR_COSTAS": "no",
+        "CONJUNTVIT": "no",
+        "ARTRITE": "no",
+        "ARTRALGIA": "no",
+        "PETEQUIA_N": "no",
+        "LEUCOPENIA": "no",
+        "LACO": "no",
+        "DOR_RETRO": "no"
+      },
+      "comorbidities": {
+        "DIABETES": "no",
+        "HEMATOLOG": "no",
+        "HEPATOPAT": "no",
+        "RENAL": "no",
+        "HIPERTENSA": "no",
+        "ACIDO_PEPT": "no",
+        "AUTO_IMUNE": "no"
+      },
+      "exposure": {
+        "FEVER_CLUSTER": "no",
+        "CONFIRMED_CASE": "no",
+        "OUTBREAK_TRAVEL": "no"
+      },
+      "language": "en"
+    },
+    "checks": [
+      {
+        "type": "status",
+        "expect": 200
+      },
+      {
+        "type": "level",
+        "model": "dengue",
+        "expect_in": [
+          "low"
+        ]
+      },
+      {
+        "type": "level",
+        "model": "worsening",
+        "expect_in": [
+          "low"
+        ]
+      },
+      {
+        "type": "level",
+        "model": "severe",
+        "expect_in": [
+          "low"
+        ]
+      },
+      {
+        "type": "score_between",
+        "model": "dengue",
+        "lo": 0.0,
+        "hi": 0.2
+      },
+      {
+        "type": "score_between",
+        "model": "severe",
+        "lo": 0.0,
+        "hi": 0.2
+      },
+      {
+        "type": "warning_signs",
+        "expect": []
+      },
+      {
+        "type": "exposure_level",
+        "expect": "low"
+      },
+      {
+        "type": "advice_order"
+      },
+      {
+        "type": "no_probability_language"
+      },
+      {
+        "type": "explanations_present"
+      }
+    ]
+  },
+  {
+    "id": "textbook-dengue",
+    "description": "Textbook dengue presentation (fever, headache, retro-orbital pain, myalgia, day 3): dengue model at least medium, severe model stays low.",
+    "endpoint": "assess",
+    "request": {
+      "age": 35,
+      "sex": "F",
+      "day_ill": 3,
+      "symptoms": {
+        "FEBRE": "yes",
+        "MIALGIA": "yes",
+        "CEFALEIA": "yes",
+        "EXANTEMA": "no",
+        "VOMITO": "no",
+        "NAUSEA": "no",
+        "DOR_COSTAS": "no",
+        "CONJUNTVIT": "no",
+        "ARTRITE": "no",
+        "ARTRALGIA": "no",
+        "PETEQUIA_N": "no",
+        "LEUCOPENIA": "no",
+        "LACO": "no",
+        "DOR_RETRO": "yes"
+      },
+      "comorbidities": {
+        "DIABETES": "no",
+        "HEMATOLOG": "no",
+        "HEPATOPAT": "no",
+        "RENAL": "no",
+        "HIPERTENSA": "no",
+        "ACIDO_PEPT": "no",
+        "AUTO_IMUNE": "no"
+      },
+      "exposure": {
+        "FEVER_CLUSTER": "no",
+        "CONFIRMED_CASE": "no",
+        "OUTBREAK_TRAVEL": "no"
+      },
+      "language": "zh-CN"
+    },
+    "checks": [
+      {
+        "type": "status",
+        "expect": 200
+      },
+      {
+        "type": "level",
+        "model": "dengue",
+        "expect_in": [
+          "medium",
+          "high"
+        ]
+      },
+      {
+        "type": "level",
+        "model": "severe",
+        "expect_in": [
+          "low"
+        ]
+      },
+      {
+        "type": "score_between",
+        "model": "dengue",
+        "lo": 44.9,
+        "hi": 45.3
+      },
+      {
+        "type": "warning_signs",
+        "expect": []
+      },
+      {
+        "type": "advice_order"
+      },
+      {
+        "type": "no_probability_language"
+      },
+      {
+        "type": "explanations_present"
+      }
+    ]
+  },
+  {
+    "id": "severe-risk-profile",
+    "description": "72-year-old male, day 6, leukopenia plus haematological/renal/diabetes/hypertension comorbidities: worsening and severe models must go high and the medical advice must urge care.",
+    "endpoint": "assess",
+    "request": {
+      "age": 72,
+      "sex": "M",
+      "day_ill": 6,
+      "symptoms": {
+        "FEBRE": "yes",
+        "MIALGIA": "no",
+        "CEFALEIA": "no",
+        "EXANTEMA": "no",
+        "VOMITO": "yes",
+        "NAUSEA": "yes",
+        "DOR_COSTAS": "no",
+        "CONJUNTVIT": "no",
+        "ARTRITE": "no",
+        "ARTRALGIA": "no",
+        "PETEQUIA_N": "yes",
+        "LEUCOPENIA": "yes",
+        "LACO": "no",
+        "DOR_RETRO": "no"
+      },
+      "comorbidities": {
+        "DIABETES": "yes",
+        "HEMATOLOG": "yes",
+        "HEPATOPAT": "no",
+        "RENAL": "yes",
+        "HIPERTENSA": "yes",
+        "ACIDO_PEPT": "no",
+        "AUTO_IMUNE": "no"
+      },
+      "exposure": {
+        "FEVER_CLUSTER": "no",
+        "CONFIRMED_CASE": "no",
+        "OUTBREAK_TRAVEL": "no"
+      },
+      "language": "zh-CN"
+    },
+    "checks": [
+      {
+        "type": "status",
+        "expect": 200
+      },
+      {
+        "type": "level",
+        "model": "worsening",
+        "expect_in": [
+          "high"
+        ]
+      },
+      {
+        "type": "level",
+        "model": "severe",
+        "expect_in": [
+          "high"
+        ]
+      },
+      {
+        "type": "score_between",
+        "model": "severe",
+        "lo": 69.9,
+        "hi": 70.3
+      },
+      {
+        "type": "warning_signs",
+        "expect": [
+          "VOMITO",
+          "PETEQUIA_N"
+        ]
+      },
+      {
+        "type": "medical_urgency"
+      },
+      {
+        "type": "advice_order"
+      },
+      {
+        "type": "no_probability_language"
+      },
+      {
+        "type": "explanations_present"
+      }
+    ]
+  },
+  {
+    "id": "warning-signs-low-score",
+    "description": "Vomiting + petechiae without blood work (LEUCOPENIA/LACO unknown): model scores stay low but WHO warning signs and seek-care advice must still fire - the false-reassurance case.",
+    "endpoint": "assess",
+    "request": {
+      "age": 45,
+      "sex": "M",
+      "day_ill": 5,
+      "symptoms": {
+        "FEBRE": "yes",
+        "MIALGIA": "no",
+        "CEFALEIA": "no",
+        "EXANTEMA": "no",
+        "VOMITO": "yes",
+        "NAUSEA": "no",
+        "DOR_COSTAS": "no",
+        "CONJUNTVIT": "no",
+        "ARTRITE": "no",
+        "ARTRALGIA": "no",
+        "PETEQUIA_N": "yes",
+        "LEUCOPENIA": "unknown",
+        "LACO": "unknown",
+        "DOR_RETRO": "no"
+      },
+      "comorbidities": {
+        "DIABETES": "no",
+        "HEMATOLOG": "no",
+        "HEPATOPAT": "no",
+        "RENAL": "no",
+        "HIPERTENSA": "no",
+        "ACIDO_PEPT": "no",
+        "AUTO_IMUNE": "no"
+      },
+      "exposure": {
+        "FEVER_CLUSTER": "no",
+        "CONFIRMED_CASE": "no",
+        "OUTBREAK_TRAVEL": "no"
+      },
+      "language": "zh-CN"
+    },
+    "checks": [
+      {
+        "type": "status",
+        "expect": 200
+      },
+      {
+        "type": "warning_signs",
+        "expect": [
+          "VOMITO",
+          "PETEQUIA_N"
+        ]
+      },
+      {
+        "type": "level",
+        "model": "worsening",
+        "expect_in": [
+          "low",
+          "medium"
+        ]
+      },
+      {
+        "type": "level",
+        "model": "severe",
+        "expect_in": [
+          "low",
+          "medium"
+        ]
+      },
+      {
+        "type": "medical_urgency"
+      },
+      {
+        "type": "no_probability_language"
+      }
+    ]
+  },
+  {
+    "id": "exposure-confirmed-case",
+    "description": "Textbook symptoms plus a confirmed dengue case nearby: exposure context must be high (rule channel), scores identical to the no-exposure twin.",
+    "endpoint": "assess",
+    "request": {
+      "age": 35,
+      "sex": "F",
+      "day_ill": 3,
+      "symptoms": {
+        "FEBRE": "yes",
+        "MIALGIA": "yes",
+        "CEFALEIA": "yes",
+        "EXANTEMA": "no",
+        "VOMITO": "no",
+        "NAUSEA": "no",
+        "DOR_COSTAS": "no",
+        "CONJUNTVIT": "no",
+        "ARTRITE": "no",
+        "ARTRALGIA": "no",
+        "PETEQUIA_N": "no",
+        "LEUCOPENIA": "no",
+        "LACO": "no",
+        "DOR_RETRO": "yes"
+      },
+      "comorbidities": {
+        "DIABETES": "no",
+        "HEMATOLOG": "no",
+        "HEPATOPAT": "no",
+        "RENAL": "no",
+        "HIPERTENSA": "no",
+        "ACIDO_PEPT": "no",
+        "AUTO_IMUNE": "no"
+      },
+      "exposure": {
+        "FEVER_CLUSTER": "no",
+        "CONFIRMED_CASE": "yes",
+        "OUTBREAK_TRAVEL": "no"
+      },
+      "language": "zh-CN"
+    },
+    "checks": [
+      {
+        "type": "status",
+        "expect": 200
+      },
+      {
+        "type": "exposure_level",
+        "expect": "high"
+      },
+      {
+        "type": "field_equals",
+        "path": "exposure_context.factors",
+        "expect": [
+          "CONFIRMED_CASE"
+        ]
+      },
+      {
+        "type": "score_between",
+        "model": "dengue",
+        "lo": 44.9,
+        "hi": 45.3
+      },
+      {
+        "type": "scores_match_scenario",
+        "ref": "exposure-all-no"
+      }
+    ]
+  },
+  {
+    "id": "exposure-fever-cluster-only",
+    "description": "Same symptoms, only a fever cluster nearby: exposure context medium, scores must not move.",
+    "endpoint": "assess",
+    "request": {
+      "age": 35,
+      "sex": "F",
+      "day_ill": 3,
+      "symptoms": {
+        "FEBRE": "yes",
+        "MIALGIA": "yes",
+        "CEFALEIA": "yes",
+        "EXANTEMA": "no",
+        "VOMITO": "no",
+        "NAUSEA": "no",
+        "DOR_COSTAS": "no",
+        "CONJUNTVIT": "no",
+        "ARTRITE": "no",
+        "ARTRALGIA": "no",
+        "PETEQUIA_N": "no",
+        "LEUCOPENIA": "no",
+        "LACO": "no",
+        "DOR_RETRO": "yes"
+      },
+      "comorbidities": {
+        "DIABETES": "no",
+        "HEMATOLOG": "no",
+        "HEPATOPAT": "no",
+        "RENAL": "no",
+        "HIPERTENSA": "no",
+        "ACIDO_PEPT": "no",
+        "AUTO_IMUNE": "no"
+      },
+      "exposure": {
+        "FEVER_CLUSTER": "yes",
+        "CONFIRMED_CASE": "no",
+        "OUTBREAK_TRAVEL": "no"
+      },
+      "language": "zh-CN"
+    },
+    "checks": [
+      {
+        "type": "status",
+        "expect": 200
+      },
+      {
+        "type": "exposure_level",
+        "expect": "medium"
+      },
+      {
+        "type": "field_equals",
+        "path": "exposure_context.factors",
+        "expect": [
+          "FEVER_CLUSTER"
+        ]
+      },
+      {
+        "type": "score_between",
+        "model": "dengue",
+        "lo": 44.9,
+        "hi": 45.3
+      },
+      {
+        "type": "scores_match_scenario",
+        "ref": "exposure-all-no"
+      }
+    ]
+  },
+  {
+    "id": "exposure-all-no",
+    "description": "Same symptoms, every exposure question answered no: exposure context low. Reference twin for the exposure-must-not-change-scores pair.",
+    "endpoint": "assess",
+    "request": {
+      "age": 35,
+      "sex": "F",
+      "day_ill": 3,
+      "symptoms": {
+        "FEBRE": "yes",
+        "MIALGIA": "yes",
+        "CEFALEIA": "yes",
+        "EXANTEMA": "no",
+        "VOMITO": "no",
+        "NAUSEA": "no",
+        "DOR_COSTAS": "no",
+        "CONJUNTVIT": "no",
+        "ARTRITE": "no",
+        "ARTRALGIA": "no",
+        "PETEQUIA_N": "no",
+        "LEUCOPENIA": "no",
+        "LACO": "no",
+        "DOR_RETRO": "yes"
+      },
+      "comorbidities": {
+        "DIABETES": "no",
+        "HEMATOLOG": "no",
+        "HEPATOPAT": "no",
+        "RENAL": "no",
+        "HIPERTENSA": "no",
+        "ACIDO_PEPT": "no",
+        "AUTO_IMUNE": "no"
+      },
+      "exposure": {
+        "FEVER_CLUSTER": "no",
+        "CONFIRMED_CASE": "no",
+        "OUTBREAK_TRAVEL": "no"
+      },
+      "language": "zh-CN"
+    },
+    "checks": [
+      {
+        "type": "status",
+        "expect": 200
+      },
+      {
+        "type": "exposure_level",
+        "expect": "low"
+      },
+      {
+        "type": "field_equals",
+        "path": "exposure_context.factors",
+        "expect": []
+      },
+      {
+        "type": "score_between",
+        "model": "dengue",
+        "lo": 44.9,
+        "hi": 45.3
+      }
+    ]
+  },
+  {
+    "id": "unknown-vs-no-baseline",
+    "description": "Six symptoms reported, LEUCOPENIA/LACO answered 'no': baseline twin for the unknown==no encoding equivalence (SINAN codes 2 and 9 both encode 0).",
+    "endpoint": "assess",
+    "request": {
+      "age": 34,
+      "sex": "F",
+      "day_ill": 3,
+      "symptoms": {
+        "FEBRE": "yes",
+        "MIALGIA": "yes",
+        "CEFALEIA": "yes",
+        "EXANTEMA": "no",
+        "VOMITO": "no",
+        "NAUSEA": "yes",
+        "DOR_COSTAS": "no",
+        "CONJUNTVIT": "no",
+        "ARTRITE": "no",
+        "ARTRALGIA": "yes",
+        "PETEQUIA_N": "no",
+        "LEUCOPENIA": "no",
+        "LACO": "no",
+        "DOR_RETRO": "yes"
+      },
+      "comorbidities": {
+        "DIABETES": "no",
+        "HEMATOLOG": "no",
+        "HEPATOPAT": "no",
+        "RENAL": "no",
+        "HIPERTENSA": "no",
+        "ACIDO_PEPT": "no",
+        "AUTO_IMUNE": "no"
+      },
+      "exposure": {
+        "FEVER_CLUSTER": "no",
+        "CONFIRMED_CASE": "no",
+        "OUTBREAK_TRAVEL": "no"
+      },
+      "language": "zh-CN"
+    },
+    "checks": [
+      {
+        "type": "status",
+        "expect": 200
+      },
+      {
+        "type": "score_between",
+        "model": "dengue",
+        "lo": 46.8,
+        "hi": 47.2
+      }
+    ]
+  },
+  {
+    "id": "unknown-vs-no-variant",
+    "description": "Identical form except LEUCOPENIA/LACO answered 'unknown': all three z values must match the 'no' baseline exactly.",
+    "endpoint": "assess",
+    "request": {
+      "age": 34,
+      "sex": "F",
+      "day_ill": 3,
+      "symptoms": {
+        "FEBRE": "yes",
+        "MIALGIA": "yes",
+        "CEFALEIA": "yes",
+        "EXANTEMA": "no",
+        "VOMITO": "no",
+        "NAUSEA": "yes",
+        "DOR_COSTAS": "no",
+        "CONJUNTVIT": "no",
+        "ARTRITE": "no",
+        "ARTRALGIA": "yes",
+        "PETEQUIA_N": "no",
+        "LEUCOPENIA": "unknown",
+        "LACO": "unknown",
+        "DOR_RETRO": "yes"
+      },
+      "comorbidities": {
+        "DIABETES": "no",
+        "HEMATOLOG": "no",
+        "HEPATOPAT": "no",
+        "RENAL": "no",
+        "HIPERTENSA": "no",
+        "ACIDO_PEPT": "no",
+        "AUTO_IMUNE": "no"
+      },
+      "exposure": {
+        "FEVER_CLUSTER": "no",
+        "CONFIRMED_CASE": "no",
+        "OUTBREAK_TRAVEL": "no"
+      },
+      "language": "zh-CN"
+    },
+    "checks": [
+      {
+        "type": "status",
+        "expect": 200
+      },
+      {
+        "type": "scores_match_scenario",
+        "ref": "unknown-vs-no-baseline"
+      }
+    ]
+  },
+  {
+    "id": "validation-age-out-of-range",
+    "description": "Age 200 is outside the 0-110 contract: request must be rejected with 422.",
+    "endpoint": "assess",
+    "request": {
+      "age": 200,
+      "sex": "M",
+      "day_ill": 3,
+      "symptoms": {
+        "FEBRE": "yes",
+        "MIALGIA": "no",
+        "CEFALEIA": "no",
+        "EXANTEMA": "no",
+        "VOMITO": "no",
+        "NAUSEA": "no",
+        "DOR_COSTAS": "no",
+        "CONJUNTVIT": "no",
+        "ARTRITE": "no",
+        "ARTRALGIA": "no",
+        "PETEQUIA_N": "no",
+        "LEUCOPENIA": "no",
+        "LACO": "no",
+        "DOR_RETRO": "no"
+      },
+      "comorbidities": {
+        "DIABETES": "no",
+        "HEMATOLOG": "no",
+        "HEPATOPAT": "no",
+        "RENAL": "no",
+        "HIPERTENSA": "no",
+        "ACIDO_PEPT": "no",
+        "AUTO_IMUNE": "no"
+      },
+      "exposure": {
+        "FEVER_CLUSTER": "no",
+        "CONFIRMED_CASE": "no",
+        "OUTBREAK_TRAVEL": "no"
+      },
+      "language": "zh-CN"
+    },
+    "checks": [
+      {
+        "type": "status",
+        "expect": 422
+      }
+    ]
+  },
+  {
+    "id": "validation-unknown-symptom-key",
+    "description": "A symptom key outside the SINAN contract must be rejected with 422.",
+    "endpoint": "assess",
+    "request": {
+      "age": 30,
+      "sex": "F",
+      "day_ill": 2,
+      "symptoms": {
+        "NOT_A_SYMPTOM": "yes"
+      },
+      "comorbidities": {},
+      "exposure": {},
+      "language": "zh-CN"
+    },
+    "checks": [
+      {
+        "type": "status",
+        "expect": 422
+      }
+    ]
+  },
+  {
+    "id": "chat-followup-zh-cn-high-tier",
+    "description": "Follow-up question in zh-CN with a high-tier assessment context: reply must be non-empty and reference the user's overall tier.",
+    "endpoint": "chat",
+    "request": {
+      "language": "zh-CN",
+      "question": "我现在的风险高吗？需要马上去医院吗？",
+      "context": {
+        "dengue": {
+          "score": 53.1,
+          "level": "medium"
+        },
+        "worsening": {
+          "score": 69.3,
+          "level": "high"
+        },
+        "severe": {
+          "score": 70.1,
+          "level": "high"
+        },
+        "warning_signs": [
+          "VOMITO",
+          "PETEQUIA_N"
+        ],
+        "exposure_level": "low",
+        "symptoms": {
+          "FEBRE": "yes",
+          "VOMITO": "yes"
+        },
+        "comorbidities": {
+          "RENAL": "yes"
+        },
+        "age": 72,
+        "sex": "M",
+        "day_ill": 6
+      },
+      "history": []
+    },
+    "checks": [
+      {
+        "type": "status",
+        "expect": 200
+      },
+      {
+        "type": "reply_nonempty"
+      },
+      {
+        "type": "reply_mentions_tier"
+      }
+    ]
+  },
+  {
+    "id": "chat-overlong-question",
+    "description": "A 600-character question exceeds the 500-character contract: 422.",
+    "endpoint": "chat",
+    "request": {
+      "language": "en",
+      "question": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "context": {},
+      "history": []
+    },
+    "checks": [
+      {
+        "type": "status",
+        "expect": 422
+      }
+    ]
+  },
+  {
+    "id": "language-zh-cn",
+    "description": "Severe-risk profile assessed in zh-CN: HTTP 200, urgency wording in the zh-CN medical advice, and the exact zh-CN disclaimer.",
+    "endpoint": "assess",
+    "request": {
+      "age": 72,
+      "sex": "M",
+      "day_ill": 6,
+      "symptoms": {
+        "FEBRE": "yes",
+        "MIALGIA": "no",
+        "CEFALEIA": "no",
+        "EXANTEMA": "no",
+        "VOMITO": "yes",
+        "NAUSEA": "yes",
+        "DOR_COSTAS": "no",
+        "CONJUNTVIT": "no",
+        "ARTRITE": "no",
+        "ARTRALGIA": "no",
+        "PETEQUIA_N": "yes",
+        "LEUCOPENIA": "yes",
+        "LACO": "no",
+        "DOR_RETRO": "no"
+      },
+      "comorbidities": {
+        "DIABETES": "yes",
+        "HEMATOLOG": "yes",
+        "HEPATOPAT": "no",
+        "RENAL": "yes",
+        "HIPERTENSA": "yes",
+        "ACIDO_PEPT": "no",
+        "AUTO_IMUNE": "no"
+      },
+      "exposure": {
+        "FEVER_CLUSTER": "no",
+        "CONFIRMED_CASE": "no",
+        "OUTBREAK_TRAVEL": "no"
+      },
+      "language": "zh-CN"
+    },
+    "checks": [
+      {
+        "type": "status",
+        "expect": 200
+      },
+      {
+        "type": "medical_urgency"
+      },
+      {
+        "type": "advice_order"
+      },
+      {
+        "type": "no_probability_language"
+      },
+      {
+        "type": "field_equals",
+        "path": "disclaimer",
+        "expect": "本结果仅供参考，不构成医疗诊断。如有不适请及时就医。"
+      }
+    ]
+  },
+  {
+    "id": "language-zh-tw",
+    "description": "Severe-risk profile assessed in zh-TW: HTTP 200, urgency wording in the zh-TW medical advice, and the exact zh-TW disclaimer.",
+    "endpoint": "assess",
+    "request": {
+      "age": 72,
+      "sex": "M",
+      "day_ill": 6,
+      "symptoms": {
+        "FEBRE": "yes",
+        "MIALGIA": "no",
+        "CEFALEIA": "no",
+        "EXANTEMA": "no",
+        "VOMITO": "yes",
+        "NAUSEA": "yes",
+        "DOR_COSTAS": "no",
+        "CONJUNTVIT": "no",
+        "ARTRITE": "no",
+        "ARTRALGIA": "no",
+        "PETEQUIA_N": "yes",
+        "LEUCOPENIA": "yes",
+        "LACO": "no",
+        "DOR_RETRO": "no"
+      },
+      "comorbidities": {
+        "DIABETES": "yes",
+        "HEMATOLOG": "yes",
+        "HEPATOPAT": "no",
+        "RENAL": "yes",
+        "HIPERTENSA": "yes",
+        "ACIDO_PEPT": "no",
+        "AUTO_IMUNE": "no"
+      },
+      "exposure": {
+        "FEVER_CLUSTER": "no",
+        "CONFIRMED_CASE": "no",
+        "OUTBREAK_TRAVEL": "no"
+      },
+      "language": "zh-TW"
+    },
+    "checks": [
+      {
+        "type": "status",
+        "expect": 200
+      },
+      {
+        "type": "medical_urgency"
+      },
+      {
+        "type": "advice_order"
+      },
+      {
+        "type": "no_probability_language"
+      },
+      {
+        "type": "field_equals",
+        "path": "disclaimer",
+        "expect": "本結果僅供參考，不構成醫療診斷。如有不適請及時就醫。"
+      }
+    ]
+  },
+  {
+    "id": "language-en",
+    "description": "Severe-risk profile assessed in en: HTTP 200, urgency wording in the en medical advice, and the exact en disclaimer.",
+    "endpoint": "assess",
+    "request": {
+      "age": 72,
+      "sex": "M",
+      "day_ill": 6,
+      "symptoms": {
+        "FEBRE": "yes",
+        "MIALGIA": "no",
+        "CEFALEIA": "no",
+        "EXANTEMA": "no",
+        "VOMITO": "yes",
+        "NAUSEA": "yes",
+        "DOR_COSTAS": "no",
+        "CONJUNTVIT": "no",
+        "ARTRITE": "no",
+        "ARTRALGIA": "no",
+        "PETEQUIA_N": "yes",
+        "LEUCOPENIA": "yes",
+        "LACO": "no",
+        "DOR_RETRO": "no"
+      },
+      "comorbidities": {
+        "DIABETES": "yes",
+        "HEMATOLOG": "yes",
+        "HEPATOPAT": "no",
+        "RENAL": "yes",
+        "HIPERTENSA": "yes",
+        "ACIDO_PEPT": "no",
+        "AUTO_IMUNE": "no"
+      },
+      "exposure": {
+        "FEVER_CLUSTER": "no",
+        "CONFIRMED_CASE": "no",
+        "OUTBREAK_TRAVEL": "no"
+      },
+      "language": "en"
+    },
+    "checks": [
+      {
+        "type": "status",
+        "expect": 200
+      },
+      {
+        "type": "medical_urgency"
+      },
+      {
+        "type": "advice_order"
+      },
+      {
+        "type": "no_probability_language"
+      },
+      {
+        "type": "field_equals",
+        "path": "disclaimer",
+        "expect": "This result is for reference only and does not constitute a medical diagnosis. Please seek medical care if you feel unwell."
+      }
+    ]
+  },
+  {
+    "id": "language-es",
+    "description": "Severe-risk profile assessed in es: HTTP 200, urgency wording in the es medical advice, and the exact es disclaimer.",
+    "endpoint": "assess",
+    "request": {
+      "age": 72,
+      "sex": "M",
+      "day_ill": 6,
+      "symptoms": {
+        "FEBRE": "yes",
+        "MIALGIA": "no",
+        "CEFALEIA": "no",
+        "EXANTEMA": "no",
+        "VOMITO": "yes",
+        "NAUSEA": "yes",
+        "DOR_COSTAS": "no",
+        "CONJUNTVIT": "no",
+        "ARTRITE": "no",
+        "ARTRALGIA": "no",
+        "PETEQUIA_N": "yes",
+        "LEUCOPENIA": "yes",
+        "LACO": "no",
+        "DOR_RETRO": "no"
+      },
+      "comorbidities": {
+        "DIABETES": "yes",
+        "HEMATOLOG": "yes",
+        "HEPATOPAT": "no",
+        "RENAL": "yes",
+        "HIPERTENSA": "yes",
+        "ACIDO_PEPT": "no",
+        "AUTO_IMUNE": "no"
+      },
+      "exposure": {
+        "FEVER_CLUSTER": "no",
+        "CONFIRMED_CASE": "no",
+        "OUTBREAK_TRAVEL": "no"
+      },
+      "language": "es"
+    },
+    "checks": [
+      {
+        "type": "status",
+        "expect": 200
+      },
+      {
+        "type": "medical_urgency"
+      },
+      {
+        "type": "advice_order"
+      },
+      {
+        "type": "no_probability_language"
+      },
+      {
+        "type": "field_equals",
+        "path": "disclaimer",
+        "expect": "Este resultado es solo orientativo y no constituye un diagnóstico médico. Si se siente mal, busque atención médica."
+      }
+    ]
+  },
+  {
+    "id": "language-pt",
+    "description": "Severe-risk profile assessed in pt: HTTP 200, urgency wording in the pt medical advice, and the exact pt disclaimer.",
+    "endpoint": "assess",
+    "request": {
+      "age": 72,
+      "sex": "M",
+      "day_ill": 6,
+      "symptoms": {
+        "FEBRE": "yes",
+        "MIALGIA": "no",
+        "CEFALEIA": "no",
+        "EXANTEMA": "no",
+        "VOMITO": "yes",
+        "NAUSEA": "yes",
+        "DOR_COSTAS": "no",
+        "CONJUNTVIT": "no",
+        "ARTRITE": "no",
+        "ARTRALGIA": "no",
+        "PETEQUIA_N": "yes",
+        "LEUCOPENIA": "yes",
+        "LACO": "no",
+        "DOR_RETRO": "no"
+      },
+      "comorbidities": {
+        "DIABETES": "yes",
+        "HEMATOLOG": "yes",
+        "HEPATOPAT": "no",
+        "RENAL": "yes",
+        "HIPERTENSA": "yes",
+        "ACIDO_PEPT": "no",
+        "AUTO_IMUNE": "no"
+      },
+      "exposure": {
+        "FEVER_CLUSTER": "no",
+        "CONFIRMED_CASE": "no",
+        "OUTBREAK_TRAVEL": "no"
+      },
+      "language": "pt"
+    },
+    "checks": [
+      {
+        "type": "status",
+        "expect": 200
+      },
+      {
+        "type": "medical_urgency"
+      },
+      {
+        "type": "advice_order"
+      },
+      {
+        "type": "no_probability_language"
+      },
+      {
+        "type": "field_equals",
+        "path": "disclaimer",
+        "expect": "Este resultado é apenas para referência e não constitui um diagnóstico médico. Se não se sentir bem, procure atendimento médico."
+      }
+    ]
+  }
+]

@@ -195,6 +195,19 @@ def _level(score: float) -> str:
     return "high"
 
 
+def score_from_z(coef: dict[str, float], z: float, wk_sin: float, wk_cos: float) -> float:
+    """线性预测值 z -> 0-100 相对分数（参考人锚定，裁剪，保留 1 位小数）。
+
+    score_one 与 planner 的区间端点都必须经过同一个函数，
+    保证同一个 z 在任何路径下得到完全相同的分数。
+    """
+    z_ref = _reference_z(coef, wk_sin, wk_cos)
+    z_ceil = _ceiling_z(coef, wk_sin, wk_cos)
+    span = z_ceil - z_ref
+    ratio = (z - z_ref) / span if span > 0 else 0.0
+    return round(100.0 * max(0.0, min(1.0, ratio)), 1)
+
+
 class DengueModel:
     """三个逻辑回归模型的推理封装。"""
 
@@ -211,12 +224,7 @@ class DengueModel:
         coef = self._models[key]["coef"]
         data = features.model_dump()
         z = sum(coef.get(name, 0.0) * float(data[name]) for name in FEATS)
-
-        z_ref = _reference_z(coef, data["wk_sin"], data["wk_cos"])
-        z_ceil = _ceiling_z(coef, data["wk_sin"], data["wk_cos"])
-        span = z_ceil - z_ref
-        ratio = (z - z_ref) / span if span > 0 else 0.0
-        score = round(100.0 * max(0.0, min(1.0, ratio)), 1)
+        score = score_from_z(coef, z, data["wk_sin"], data["wk_cos"])
         return ModelScore(score=score, level=_level(score), z=round(z, 4))
 
     def score_all(self, features: MLFeatures) -> dict[str, ModelScore]:
@@ -265,6 +273,10 @@ class DengueModel:
             RESULT_FIELDS[key]: self.explain_one(key, features, top_n)
             for key in MODEL_KEYS
         }
+
+    def coefficients(self, key: str) -> dict[str, float]:
+        """某个模型的系数字典（只读用途，供 planner 计算分数边界与信息价值）。"""
+        return self._models[key]["coef"]
 
     def info(self) -> dict[str, dict]:
         """模型元信息（名称与 AUC），供 /api/health 等展示。"""

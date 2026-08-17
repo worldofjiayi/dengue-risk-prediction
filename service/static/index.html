@@ -71,6 +71,12 @@
           </div>
         </header>
 
+        <!-- 问诊模式切换：智能问诊（自适应） / 完整问卷 -->
+        <div id="mode-toggle" class="mode-toggle" role="group" aria-label="选择问诊方式">
+          <button id="mode-adaptive" class="mode-btn" type="button" aria-pressed="true">智能问诊（推荐）</button>
+          <button id="mode-classic" class="mode-btn" type="button" aria-pressed="false">完整问卷</button>
+        </div>
+
         <div id="wizard-panel" class="wizard-panel card"><!-- 步骤内容由 app.js 渲染 --></div>
 
         <p id="wizard-hint" class="wizard-hint" role="alert" hidden></p>

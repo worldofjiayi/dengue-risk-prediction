@@ -121,6 +121,97 @@ Observed spread:
 The low/medium/high cut-offs (35 / 65) are engineering defaults. Recalibration on a
 prevalence-preserving sample is required before clinical use; the eval log exists to support that.
 
+### Adaptive questioning — provable early stopping
+
+Twenty-one tri-state questions is a lot to ask someone with a fever. `POST /api/plan`
+([`app/planner.py`](app/planner.py)) lets the frontend ask only the questions that can still
+change the outcome — and prove when it is safe to stop.
+
+**The bounds maths.** All three models are linear in their features, and every coefficient is
+known. For a partially-answered questionnaire, each model's final score is therefore *hard-bounded*:
+
+- an **answered** binary question contributes exactly `yes → coef`, `no`/`unknown` → 0;
+- an **unasked** binary question can only end up contributing 0 or its coefficient, so over the
+  unasked set:
+
+  ```
+  z_min = z_answered + Σ min(0, coef_f)
+  z_max = z_answered + Σ max(0, coef_f)
+  ```
+
+- `age` / `sex` / `day_ill` are mandatory in the questionnaire's first step, and the seasonal
+  terms are server-computed constants for the day — neither adds uncertainty.
+
+`z_min` / `z_max` pass through the *same* reference-anchored normalisation as the real score
+(the shared `score_from_z` helper, clipped to [0, 100]), yielding `[score_min, score_max]` per
+model. `score_now` is the score with unasked questions treated as 0 — exactly what `/api/assess`
+would return if the user stopped right now, byte-for-byte.
+
+**The stop rule.** A model is `decided` when `[score_min, score_max]` lies inside a single risk
+band (same `level` at both ends, honouring the 35 / 65 cut-offs). When all three models are
+decided, **no combination of remaining answers can change any tier** — `can_stop` is true and
+that is a proof, not a heuristic. In practice a healthy respondent who answers "no" to the
+half-dozen highest-impact questions is fully decided with 14 questions still unasked.
+
+The request distinguishes *answered "don't know"* (a deterministic 0 — the interval tightens
+exactly as for "no") from *not asked yet* (genuinely uncertain): **a present key means answered,
+a missing key means unasked**. This is why the endpoint has its own `PlanRequest` model instead
+of reusing `FormInput`, whose validators fill missing keys with `unknown` and would erase the
+distinction.
+
+**Contract.**
+
+```json
+POST /api/plan
+{
+  "age": 35, "sex": "F", "day_ill": 3,
+  "symptoms":      { "FEBRE": "yes", "VOMITO": "no" },
+  "comorbidities": { "DIABETES": "unknown" },
+  "language": "zh-CN"
+}
+```
+
+```json
+{
+  "bounds": {
+    "dengue":    { "score_now": 45.1, "score_min": 30.2, "score_max": 88.7,
+                   "level_now": "medium", "decided": false },
+    "worsening": { "...": "..." },
+    "severe":    { "...": "..." }
+  },
+  "can_stop": false,
+  "next": [
+    { "kind": "symptom",     "code": "LEUCOPENIA", "why_model": "severe" },
+    { "kind": "comorbidity", "code": "HEMATOLOG",  "why_model": "severe" }
+  ],
+  "answered": 3,
+  "remaining": 18
+}
+```
+
+Unknown codes and out-of-range values return 422, as in `/api/assess`.
+
+**Question ranking.** `next` holds up to 5 unasked questions, ordered by information value:
+
+```
+impact(f) = Σ over undecided models m of |coef_f^m| / (z_ceil^m − z_ref^m)
+```
+
+Dividing by each model's own normalisation span makes coefficients comparable across models
+before summing. `why_model` names the undecided model where the feature's normalised |coef| is
+largest — the frontend uses it to say "this question mainly informs the severe-disease estimate".
+Ordering is fully deterministic: impact descending, ties broken by `FEATS` order. Once every
+model is decided, `next` is `[]` no matter how many questions remain.
+
+**Deterministic by design.** The planner calls no LLM. The fitted coefficients *are* the
+information value of each question — which answer could move which score by how much is a closed-
+form fact, and the stop rule is a proof over score bounds. An LLM choosing the next question
+could only add noise (and non-reproducibility) to a decision the model already answers exactly.
+
+The two WHO warning-sign symptoms (`VOMITO`, `PETEQUIA_N`) and the three exposure questions are
+treated as mandatory by the frontend regardless of planning — the planner does not special-case
+them; they simply tend to arrive already answered.
+
 ### WHO warning signs — independent of the model
 
 Both severity models lean heavily on leukopenia — the single strongest predictor in Model B
@@ -285,6 +376,13 @@ frontend replays the context and recent history on every turn.
   call.
 - Errors: `DeepSeekError` → 502, unexpected → 500, both with a `detail` localised to `language`.
 
+### `POST /api/plan`
+
+Adaptive-questioning planner: hard score bounds for a partially-answered questionnaire, a
+provable stop signal, and the next questions worth asking. Fully deterministic, no LLM call.
+Request/response contract and the underlying maths are documented in
+[Adaptive questioning](#adaptive-questioning--provable-early-stopping).
+
 ### Languages
 
 `language` accepts `zh-CN` (default), `zh-TW`, `en`, `es`, `pt`, and controls `summary`, `advice`,
@@ -314,7 +412,7 @@ are the exposure tier and the contribution breakdown. Only the natural-language 
 replies are canned (localised per language, and varied by risk tier). No API key required.
 
 ```bash
-pytest tests          # 92 tests
+pytest tests          # 128 tests
 ```
 
 ---
@@ -479,9 +577,10 @@ sudo certbot --nginx -d example.com
 ```
 service/
 ├── app/
-│   ├── main.py             FastAPI entry point, routes (/api/assess, /api/chat), static mounting
-│   ├── schemas.py          FormInput / MLFeatures / AssessmentResult / Chat*, FEATS, localised strings
+│   ├── main.py             FastAPI entry point, routes (/api/assess, /api/chat, /api/plan), static mounting
+│   ├── schemas.py          FormInput / MLFeatures / AssessmentResult / Chat* / Plan*, FEATS, localised strings
 │   ├── ml_model.py         coefficient loading, feature encoding, scoring, contribution breakdown
+│   ├── planner.py          adaptive questioning: score bounds, provable stop rule, next-question ranking
 │   ├── pipeline.py         orchestration: encode → rules → score → advise → assemble; chat
 │   ├── prompt_builder.py   the LLM prompts (features, advice, chat)
 │   ├── deepseek_client.py  OpenAI-compatible client, JSON + plain-text calls, tiered mock data
@@ -490,7 +589,7 @@ service/
 │   └── model/
 │       └── dengue_models.json    fitted coefficients (mirror of ../model/results/)
 ├── static/                 hand-written frontend, zero external dependencies
-├── tests/                  92 pytest tests
+├── tests/                  128 pytest tests
 ├── scripts/eval_stats.py   evaluation log statistics
 ├── deploy/                 systemd unit + manual launch script
 ├── .env.example

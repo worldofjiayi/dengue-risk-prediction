@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import get_settings
 from app.deepseek_client import DeepSeekError
 from app.pipeline import run_assessment, run_chat
+from app.planner import plan
 from app.schemas import (
     SERVER_ERRORS,
     UPSTREAM_ERRORS,
@@ -16,6 +17,8 @@ from app.schemas import (
     ChatRequest,
     ChatResponse,
     FormInput,
+    PlanRequest,
+    PlanResponse,
 )
 
 logging.basicConfig(
@@ -78,6 +81,22 @@ async def chat(req: ChatRequest) -> ChatResponse:
         logger.exception("追问对话发生未知错误")
         raise HTTPException(
             status_code=500, detail=SERVER_ERRORS.get(req.language, SERVER_ERRORS["zh-CN"])
+        ) from exc
+
+
+@app.post("/api/plan", response_model=PlanResponse)
+async def plan_questions(req: PlanRequest) -> PlanResponse:
+    """自适应问诊规划：分数硬边界、能否证明性地停止、接下来最值得问的问题。
+
+    完全确定性的计算（只用模型系数），不调用任何 LLM，无副作用。
+    """
+    try:
+        return plan(req)
+    except Exception as exc:
+        logger.exception("问诊规划发生未知错误")
+        raise HTTPException(
+            status_code=500,
+            detail=SERVER_ERRORS.get(req.language, SERVER_ERRORS["zh-CN"]),
         ) from exc
 
 

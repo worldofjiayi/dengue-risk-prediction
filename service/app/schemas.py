@@ -206,10 +206,20 @@ class FormInput(BaseModel):
 
 def _fill_answers(value: dict, codes: tuple[str, ...], field: str) -> dict:
     """补全缺失的键为 unknown；出现契约外的键则报错。"""
+    _require_known_keys(value, codes, field)
+    return {code: value.get(code, "unknown") for code in codes}
+
+
+def _require_known_keys(value: dict, codes: tuple[str, ...], field: str) -> dict:
+    """只校验键在契约内，**不补全缺失键**。
+
+    /api/plan 的语义是「键存在 = 已作答，键缺失 = 还没问」，
+    缺失本身就是信号，绝不能像 FormInput 那样补成 unknown。
+    """
     unknown_keys = set(value) - set(codes)
     if unknown_keys:
         raise ValueError(f"{field} 含未知字段：{sorted(unknown_keys)}")
-    return {code: value.get(code, "unknown") for code in codes}
+    return value
 
 
 class MLFeatures(BaseModel):
@@ -412,3 +422,94 @@ def _drop_unknown_keys(value: dict, codes: tuple[str, ...]) -> dict:
     多一个陌生键不该让用户问不了问题，静默丢弃即可。
     """
     return {k: v for k, v in value.items() if k in codes}
+
+
+# ---------- 自适应问诊规划（POST /api/plan） ----------
+
+
+class PlanRequest(BaseModel):
+    """POST /api/plan 请求体：一份**部分作答**的问卷。
+
+    与 FormInput 的关键差异：**键的存在与否本身携带信息**。
+      - 键存在 = 该问题已问过（yes / no / unknown 都是确定的回答）；
+      - 键缺失 = 该问题还没问，最终取值不确定。
+
+    因此不能复用 FormInput——它的校验器会把缺失键补成 unknown，
+    恰好抹掉「已答不知道」与「还没问」的区别，而这正是规划器的全部依据。
+    age / sex / day_ill 是问卷第一步的必填项，规划从它们已知开始。
+    """
+
+    age: int = Field(..., ge=0, le=110, description="年龄（岁）")
+    sex: Sex = Field(..., description="生理性别，F 女 / M 男")
+    day_ill: int = Field(..., ge=0, le=14, description="症状开始至今的天数")
+    symptoms: dict[str, SymptomAnswer] = Field(
+        default_factory=dict,
+        description="已作答的症状：键存在 = 已问。缺失键 = 未问，不做补全。",
+    )
+    comorbidities: dict[str, SymptomAnswer] = Field(
+        default_factory=dict,
+        description="已作答的合并症，语义同 symptoms。",
+    )
+    language: Language = Field(default="zh-CN", description="输出语言（用于错误信息本地化）")
+
+    @field_validator("symptoms")
+    @classmethod
+    def _known_symptom_keys(cls, value: dict[str, str]) -> dict[str, str]:
+        return _require_known_keys(value, SYMPTOM_CODES, "symptoms")
+
+    @field_validator("comorbidities")
+    @classmethod
+    def _known_comorb_keys(cls, value: dict[str, str]) -> dict[str, str]:
+        return _require_known_keys(value, COMORB_CODES, "comorbidities")
+
+
+class ModelBounds(BaseModel):
+    """单个模型在部分作答下的分数硬边界（同一归一化，同一分档）。"""
+
+    score_now: float = Field(
+        ..., ge=0.0, le=100.0,
+        description="未问按 0 计的当前分——用户此刻停止作答时的最终分",
+    )
+    score_min: float = Field(
+        ..., ge=0.0, le=100.0, description="剩余问题任意作答都到不了更低的分数下界"
+    )
+    score_max: float = Field(
+        ..., ge=0.0, le=100.0, description="剩余问题任意作答都到不了更高的分数上界"
+    )
+    level_now: RiskLevel
+    decided: bool = Field(
+        ..., description="[score_min, score_max] 是否已落在同一风险档位内"
+    )
+
+
+class PlanBounds(BaseModel):
+    """三个模型的分数边界，键名与 AssessmentResult 一致。"""
+
+    dengue: ModelBounds
+    worsening: ModelBounds
+    severe: ModelBounds
+
+
+class NextQuestion(BaseModel):
+    """建议接下来问的一道题。"""
+
+    kind: Literal["symptom", "comorbidity"]
+    code: str = Field(..., description="SYMPTOM_CODES / COMORB_CODES 中的问题代码")
+    why_model: Literal["dengue", "worsening", "severe"] = Field(
+        ..., description="这道题主要在收窄哪个尚未定档模型的估计"
+    )
+
+
+class PlanResponse(BaseModel):
+    """POST /api/plan 响应体。"""
+
+    bounds: PlanBounds
+    can_stop: bool = Field(
+        ..., description="三个模型全部 decided：任何剩余答案都无法改变任何档位"
+    )
+    next: list[NextQuestion] = Field(
+        default_factory=list,
+        description="最多 5 条，按信息价值降序；全部定档后恒为空",
+    )
+    answered: int = Field(..., ge=0, description="已作答的症状 + 合并症数量")
+    remaining: int = Field(..., ge=0, description="尚未问的症状 + 合并症数量")
