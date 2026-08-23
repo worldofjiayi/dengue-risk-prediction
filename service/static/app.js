@@ -114,15 +114,13 @@ const I18N = {
     langLabel: '选择语言',
     a11y: { progress: '问卷进度', chatLog: '对话记录' },
     hero: {
-      badge: '登革热 · 风险自评',
       title: '登革热<br />风险自测',
       subtitle: '回答症状与病史问题，获得风险参考与防护建议',
-      features: ['针对登革热的风险评估', '基于真实的登革热监测数据', '提供五种语言'],
+      features: ['登革热专用', '真实数据建模', '五种语言'],
       ctaTravelTitle: '我要去某个地方',
       ctaTravelDesc: '查看目的地的登革热情况',
       ctaSymptomsTitle: '我有症状',
       ctaSymptomsDesc: '回答几个问题，获得风险参考',
-      privacy: '无需注册，不收集个人信息；补充说明不会被保存。',
       privacyLink: '隐私说明',
     },
     sources: { label: '信息来源', who: '世界卫生组织', search: '网络检索', official: '官方' },
@@ -138,7 +136,6 @@ const I18N = {
       emptyHint: '请先输入目的地。',
       loading: {
         steps: ['正在查询地区背景资料…', '正在检索近期报道…', '正在汇总结果…'],
-        sub: '通常只需几秒',
       },
       errors: {
         network: '网络连接失败，请检查网络后重试。',
@@ -203,12 +200,12 @@ const I18N = {
     stepCounter: '第 {cur} 步 / 共 {total} 步',
     steps: {
       basic: { title: '基本信息' },
-      common: { title: '常见症状', sub: '最近是否出现以下情况？' },
-      other: { title: '其他症状', sub: '继续，还有几项' },
+      common: { title: '常见症状', },
+      other: { title: '其他症状', },
       clinical: { title: '出血与化验', sub: '根据医生检查结果' },
       exposure: { title: '周围环境与暴露' },
       history: { title: '既往病史' },
-      notes: { title: '补充说明', sub: '还有什么想告诉我们的吗？（选填）' },
+      notes: { title: '补充说明', },
     },
     fields: {
       age: '年龄', ageUnit: '岁',
@@ -232,19 +229,13 @@ const I18N = {
       stageSafety: '安全筛查',
       stageLoop: '智能提问',
       questionCounter: '第 {n} 题',
-      stopProven: '剩余问题不会再改变任何结论，可以出结果了。',
-      stopCap: '已达到问题数上限，可以出结果了。',
-      stopNoMore: '没有更多值得问的问题了，可以出结果了。',
       continueFull: '补充更多问题（转完整问卷）',
-      keyHint: '也可以按键盘 1 / 2 / 3 作答',
     },
     loading: {
       steps: ['正在整理你的作答…', '模型评估中…', '正在生成个性化建议…'],
-      sub: '请稍候，通常不超过 10 秒',
     },
     result: {
       title: '评估结果',
-      sub: '基于你提供的症状与病史生成',
       dengue: '登革热可能性',
       severe: '重症风险',
       worsening: '病情加重风险',
@@ -255,8 +246,6 @@ const I18N = {
         title: '{metric} · 影响最大的因素',
         up: '推高评分',
         down: '拉低评分',
-        caveat: '以上是模型对这个评分的线性贡献项：它解释分数是怎么算出来的，不代表病因。',
-        seasonal: '「季节性周期」只取决于当前是第几周，与你本人无关：它今天让每个人的评分都平移同样的量，互相比较时会抵消掉。',
         empty: '这一项暂时没有可展示的贡献项。',
       },
       exposure: {
@@ -266,7 +255,6 @@ const I18N = {
         none: '你没有报告周围有相关的暴露情况。',
         sep: '、',
       },
-      epiWeek: '评估周次：第 {week} 周',
       warning: {
         title: '出现登革热警示征象',
         body: '你报告了 {signs}，这属于世界卫生组织列出的登革热警示征象。无论上方评分高低，都建议尽快就医评估。',
@@ -353,15 +341,13 @@ const I18N = {
     langLabel: '選擇語言',
     a11y: { progress: '問卷進度', chatLog: '對話紀錄' },
     hero: {
-      badge: '登革熱 · 風險自評',
       title: '登革熱<br />風險自測',
       subtitle: '回答症狀與病史問題，獲得風險參考與防護建議',
-      features: ['針對登革熱的風險評估', '基於真實的登革熱監測資料', '提供五種語言'],
+      features: ['登革熱專用', '真實數據建模', '五種語言'],
       ctaTravelTitle: '我要去某個地方',
       ctaTravelDesc: '查看目的地的登革熱情況',
       ctaSymptomsTitle: '我有症狀',
       ctaSymptomsDesc: '回答幾個問題，取得風險參考',
-      privacy: '無需註冊，不蒐集個人資訊；補充說明不會被保存。',
       privacyLink: '隱私說明',
     },
     sources: { label: '資訊來源', who: '世界衛生組織', search: '網路搜尋', official: '官方' },
@@ -377,7 +363,6 @@ const I18N = {
       emptyHint: '請先輸入目的地。',
       loading: {
         steps: ['正在查詢地區背景資料…', '正在搜尋近期報導…', '正在彙整結果…'],
-        sub: '通常只需幾秒',
       },
       errors: {
         network: '網路連線失敗，請檢查網路後重試。',
@@ -442,12 +427,12 @@ const I18N = {
     stepCounter: '第 {cur} 步 / 共 {total} 步',
     steps: {
       basic: { title: '基本資料' },
-      common: { title: '常見症狀', sub: '最近是否出現以下情況？' },
-      other: { title: '其他症狀', sub: '繼續，還有幾項' },
+      common: { title: '常見症狀', },
+      other: { title: '其他症狀', },
       clinical: { title: '出血與檢驗', sub: '根據醫師檢查結果' },
       exposure: { title: '周遭環境與暴露' },
       history: { title: '過去病史' },
-      notes: { title: '補充說明', sub: '還有什麼想告訴我們的嗎？（選填）' },
+      notes: { title: '補充說明', },
     },
     fields: {
       age: '年齡', ageUnit: '歲',
@@ -471,19 +456,13 @@ const I18N = {
       stageSafety: '安全篩檢',
       stageLoop: '智慧提問',
       questionCounter: '第 {n} 題',
-      stopProven: '剩餘問題不會再改變任何結論，可以出結果了。',
-      stopCap: '已達到問題數上限，可以出結果了。',
-      stopNoMore: '沒有更多值得問的問題了，可以出結果了。',
       continueFull: '補充更多問題（轉完整問卷）',
-      keyHint: '也可以按鍵盤 1 / 2 / 3 作答',
     },
     loading: {
       steps: ['正在整理你的作答…', '模型評估中…', '正在產生個人化建議…'],
-      sub: '請稍候，通常不超過 10 秒',
     },
     result: {
       title: '評估結果',
-      sub: '根據你提供的症狀與病史產生',
       dengue: '登革熱可能性',
       severe: '重症風險',
       worsening: '病情加重風險',
@@ -494,8 +473,6 @@ const I18N = {
         title: '{metric} · 影響最大的因素',
         up: '推高評分',
         down: '拉低評分',
-        caveat: '以上是模型對這個評分的線性貢獻項：它解釋分數是怎麼算出來的，不代表病因。',
-        seasonal: '「季節性週期」只取決於目前是第幾週，與你本人無關：它今天讓每個人的評分都平移相同的量，互相比較時會抵銷。',
         empty: '這一項目前沒有可顯示的貢獻項。',
       },
       exposure: {
@@ -505,7 +482,6 @@ const I18N = {
         none: '你沒有回報周遭有相關的暴露情況。',
         sep: '、',
       },
-      epiWeek: '評估週次：第 {week} 週',
       warning: {
         title: '出現登革熱警示徵象',
         body: '你回報了 {signs}，這屬於世界衛生組織列出的登革熱警示徵象。無論上方評分高低，都建議盡快就醫評估。',
@@ -592,19 +568,13 @@ const I18N = {
     langLabel: 'Select language',
     a11y: { progress: 'Questionnaire progress', chatLog: 'Conversation' },
     hero: {
-      badge: 'Dengue · Risk self-check',
       title: 'Dengue Risk<br />Self-Check',
       subtitle: 'Answer a few questions to get a risk indicator and protection advice',
-      features: [
-        'Dengue-specific risk assessment',
-        'Built on real dengue surveillance data',
-        'Available in five languages',
-      ],
+      features: ['Dengue-specific', 'Built on real data', 'Five languages'],
       ctaTravelTitle: 'I’m travelling somewhere',
       ctaTravelDesc: 'See the dengue situation at that destination',
       ctaSymptomsTitle: 'I have symptoms',
       ctaSymptomsDesc: 'Answer a few questions for a risk indicator',
-      privacy: 'No account or personal details; free-text notes are never stored.',
       privacyLink: 'Privacy',
     },
     sources: { label: 'Sources', who: 'World Health Organization', search: 'Web search', official: 'Official' },
@@ -620,7 +590,6 @@ const I18N = {
       emptyHint: 'Please enter a destination first.',
       loading: {
         steps: ['Looking up regional background…', 'Searching recent reports…', 'Putting it together…'],
-        sub: 'This usually takes a few seconds',
       },
       errors: {
         network: 'Network connection failed. Please check your connection and try again.',
@@ -685,12 +654,12 @@ const I18N = {
     stepCounter: 'Step {cur} of {total}',
     steps: {
       basic: { title: 'Basic information' },
-      common: { title: 'Common symptoms', sub: 'Have you had any of these recently?' },
-      other: { title: 'Other symptoms', sub: 'Almost there — a few more' },
+      common: { title: 'Common symptoms', },
+      other: { title: 'Other symptoms', },
       clinical: { title: 'Bleeding & lab findings', sub: 'Based on your doctor’s findings' },
       exposure: { title: 'Surroundings & exposure' },
       history: { title: 'Medical history' },
-      notes: { title: 'Anything else', sub: 'Optional — tell us more in your own words' },
+      notes: { title: 'Anything else', },
     },
     fields: {
       age: 'Age', ageUnit: 'years',
@@ -714,19 +683,13 @@ const I18N = {
       stageSafety: 'Safety check',
       stageLoop: 'Smart questions',
       questionCounter: 'Question {n}',
-      stopProven: 'The remaining questions cannot change any conclusion — your result is ready.',
-      stopCap: 'Question limit reached — your result is ready.',
-      stopNoMore: 'No further questions are worth asking — your result is ready.',
       continueFull: 'Answer more questions (full questionnaire)',
-      keyHint: 'You can also press 1 / 2 / 3 on your keyboard',
     },
     loading: {
       steps: ['Organising your answers…', 'Running the model…', 'Preparing your advice…'],
-      sub: 'This usually takes less than 10 seconds',
     },
     result: {
       title: 'Your result',
-      sub: 'Generated from the symptoms and history you provided',
       dengue: 'Dengue likelihood',
       severe: 'Severe-disease risk',
       worsening: 'Risk of worsening',
@@ -737,8 +700,6 @@ const I18N = {
         title: '{metric} · largest contributors',
         up: 'raises the score',
         down: 'lowers the score',
-        caveat: 'These are the model’s linear contributions to this score. They explain how the number was computed — they are not causes of your illness.',
-        seasonal: 'The seasonal pattern depends only on the current week, not on you: today it shifts everyone’s score by the same amount, so it cancels out when scores are compared.',
         empty: 'No contributors are available for this score.',
       },
       exposure: {
@@ -748,7 +709,6 @@ const I18N = {
         none: 'You did not report any relevant exposure around you.',
         sep: ', ',
       },
-      epiWeek: 'Assessment week: week {week}',
       warning: {
         title: 'Dengue warning sign present',
         body: 'You reported {signs}, which the World Health Organization lists as a dengue warning sign. Regardless of the scores above, you should seek medical assessment promptly.',
@@ -835,19 +795,13 @@ const I18N = {
     langLabel: 'Seleccionar idioma',
     a11y: { progress: 'Progreso del cuestionario', chatLog: 'Conversación' },
     hero: {
-      badge: 'Dengue · Autoevaluación de riesgo',
       title: 'Riesgo de dengue<br />Autoevaluación',
       subtitle: 'Responda unas preguntas y obtenga un indicador de riesgo y consejos de protección',
-      features: [
-        'Evaluación de riesgo específica del dengue',
-        'Basada en datos reales de vigilancia del dengue',
-        'Disponible en cinco idiomas',
-      ],
+      features: ['Específico para dengue', 'Basado en datos reales', 'Cinco idiomas'],
       ctaTravelTitle: 'Voy a viajar',
       ctaTravelDesc: 'Consulte la situación del dengue en ese destino',
       ctaSymptomsTitle: 'Tengo síntomas',
       ctaSymptomsDesc: 'Responda unas preguntas y obtenga un indicador de riesgo',
-      privacy: 'Sin cuenta ni datos personales; los comentarios libres nunca se almacenan.',
       privacyLink: 'Privacidad',
     },
     sources: { label: 'Fuentes', who: 'Organización Mundial de la Salud', search: 'Búsqueda web', official: 'Oficial' },
@@ -863,7 +817,6 @@ const I18N = {
       emptyHint: 'Escriba primero un destino.',
       loading: {
         steps: ['Consultando el contexto regional…', 'Buscando informes recientes…', 'Reuniendo la información…'],
-        sub: 'Suele tardar unos segundos',
       },
       errors: {
         network: 'Fallo de conexión. Revise su red e inténtelo de nuevo.',
@@ -928,12 +881,12 @@ const I18N = {
     stepCounter: 'Paso {cur} de {total}',
     steps: {
       basic: { title: 'Datos básicos' },
-      common: { title: 'Síntomas frecuentes', sub: '¿Ha presentado alguno de estos últimamente?' },
-      other: { title: 'Otros síntomas', sub: 'Continuemos, faltan pocos' },
+      common: { title: 'Síntomas frecuentes', },
+      other: { title: 'Otros síntomas', },
       clinical: { title: 'Sangrado y laboratorio', sub: 'Según los hallazgos de su médico' },
       exposure: { title: 'Entorno y exposición' },
       history: { title: 'Antecedentes médicos' },
-      notes: { title: 'Comentarios', sub: 'Opcional: cuéntenos algo más con sus palabras' },
+      notes: { title: 'Comentarios', },
     },
     fields: {
       age: 'Edad', ageUnit: 'años',
@@ -957,19 +910,13 @@ const I18N = {
       stageSafety: 'Preguntas de seguridad',
       stageLoop: 'Preguntas inteligentes',
       questionCounter: 'Pregunta {n}',
-      stopProven: 'Las preguntas restantes ya no pueden cambiar ninguna conclusión: su resultado está listo.',
-      stopCap: 'Se alcanzó el límite de preguntas: su resultado está listo.',
-      stopNoMore: 'No quedan preguntas que valga la pena hacer: su resultado está listo.',
       continueFull: 'Responder más preguntas (cuestionario completo)',
-      keyHint: 'También puede pulsar 1 / 2 / 3 en el teclado',
     },
     loading: {
       steps: ['Organizando sus respuestas…', 'Ejecutando el modelo…', 'Preparando sus recomendaciones…'],
-      sub: 'Normalmente tarda menos de 10 segundos',
     },
     result: {
       title: 'Su resultado',
-      sub: 'Generado a partir de los síntomas y antecedentes indicados',
       dengue: 'Probabilidad relativa de dengue',
       severe: 'Riesgo de gravedad',
       worsening: 'Riesgo de empeoramiento',
@@ -980,8 +927,6 @@ const I18N = {
         title: '{metric} · factores más influyentes',
         up: 'aumenta la puntuación',
         down: 'reduce la puntuación',
-        caveat: 'Son las contribuciones lineales del modelo a esta puntuación: explican cómo se calculó la cifra, no son causas de su enfermedad.',
-        seasonal: 'El patrón estacional depende solo de la semana del año, no de usted: hoy desplaza por igual la puntuación de todas las personas, así que se cancela al comparar.',
         empty: 'No hay factores disponibles para esta puntuación.',
       },
       exposure: {
@@ -991,7 +936,6 @@ const I18N = {
         none: 'No ha indicado ninguna exposición relevante en su entorno.',
         sep: ', ',
       },
-      epiWeek: 'Semana de evaluación: semana {week}',
       warning: {
         title: 'Signo de alarma de dengue presente',
         body: 'Ha indicado {signs}, que la Organización Mundial de la Salud considera un signo de alarma del dengue. Independientemente de las puntuaciones anteriores, conviene buscar valoración médica cuanto antes.',
@@ -1078,19 +1022,13 @@ const I18N = {
     langLabel: 'Selecionar idioma',
     a11y: { progress: 'Progresso do questionário', chatLog: 'Conversa' },
     hero: {
-      badge: 'Dengue · Autoavaliação de risco',
       title: 'Risco de dengue<br />Autoavaliação',
       subtitle: 'Responda a algumas perguntas e receba um indicador de risco e orientações',
-      features: [
-        'Avaliação de risco específica da dengue',
-        'Baseada em dados reais de vigilância da dengue',
-        'Disponível em cinco idiomas',
-      ],
+      features: ['Específico para dengue', 'Baseado em dados reais', 'Cinco idiomas'],
       ctaTravelTitle: 'Vou viajar',
       ctaTravelDesc: 'Veja a situação da dengue nesse destino',
       ctaSymptomsTitle: 'Tenho sintomas',
       ctaSymptomsDesc: 'Responda a algumas perguntas e receba um indicador de risco',
-      privacy: 'Sem cadastro nem dados pessoais; as observações livres nunca são armazenadas.',
       privacyLink: 'Privacidade',
     },
     sources: { label: 'Fontes', who: 'Organização Mundial da Saúde', search: 'Busca na web', official: 'Oficial' },
@@ -1106,7 +1044,6 @@ const I18N = {
       emptyHint: 'Digite primeiro um destino.',
       loading: {
         steps: ['Consultando o contexto regional…', 'Buscando relatos recentes…', 'Reunindo as informações…'],
-        sub: 'Costuma levar alguns segundos',
       },
       errors: {
         network: 'Falha de conexão. Verifique sua rede e tente novamente.',
@@ -1171,12 +1108,12 @@ const I18N = {
     stepCounter: 'Etapa {cur} de {total}',
     steps: {
       basic: { title: 'Dados básicos' },
-      common: { title: 'Sintomas comuns', sub: 'Apresentou algum destes recentemente?' },
-      other: { title: 'Outros sintomas', sub: 'Vamos continuar, faltam poucos' },
+      common: { title: 'Sintomas comuns', },
+      other: { title: 'Outros sintomas', },
       clinical: { title: 'Sangramento e exames', sub: 'Conforme os achados do seu médico' },
       exposure: { title: 'Ambiente e exposição' },
       history: { title: 'Histórico médico' },
-      notes: { title: 'Observações', sub: 'Opcional: conte-nos mais com suas palavras' },
+      notes: { title: 'Observações', },
     },
     fields: {
       age: 'Idade', ageUnit: 'anos',
@@ -1200,19 +1137,13 @@ const I18N = {
       stageSafety: 'Perguntas de segurança',
       stageLoop: 'Perguntas inteligentes',
       questionCounter: 'Pergunta {n}',
-      stopProven: 'As perguntas restantes já não podem mudar nenhuma conclusão: seu resultado está pronto.',
-      stopCap: 'Limite de perguntas atingido: seu resultado está pronto.',
-      stopNoMore: 'Não há mais perguntas que valham a pena: seu resultado está pronto.',
       continueFull: 'Responder mais perguntas (questionário completo)',
-      keyHint: 'Você também pode pressionar 1 / 2 / 3 no teclado',
     },
     loading: {
       steps: ['Organizando suas respostas…', 'Executando o modelo…', 'Preparando suas orientações…'],
-      sub: 'Normalmente leva menos de 10 segundos',
     },
     result: {
       title: 'Seu resultado',
-      sub: 'Gerado a partir dos sintomas e do histórico informados',
       dengue: 'Probabilidade relativa de dengue',
       severe: 'Risco de gravidade',
       worsening: 'Risco de piora',
@@ -1223,8 +1154,6 @@ const I18N = {
         title: '{metric} · fatores de maior peso',
         up: 'aumenta a pontuação',
         down: 'reduz a pontuação',
-        caveat: 'São as contribuições lineares do modelo para esta pontuação: explicam como o número foi calculado, não são causas da sua doença.',
-        seasonal: 'O padrão sazonal depende apenas da semana do ano, não de você: hoje ele desloca igualmente a pontuação de todas as pessoas, portanto se cancela na comparação.',
         empty: 'Não há fatores disponíveis para esta pontuação.',
       },
       exposure: {
@@ -1234,7 +1163,6 @@ const I18N = {
         none: 'Você não relatou nenhuma exposição relevante ao seu redor.',
         sep: ', ',
       },
-      epiWeek: 'Semana da avaliação: semana {week}',
       warning: {
         title: 'Sinal de alarme de dengue presente',
         body: 'Você relatou {signs}, que a Organização Mundial da Saúde considera um sinal de alarme da dengue. Independentemente das pontuações acima, procure avaliação médica o quanto antes.',
@@ -1496,7 +1424,6 @@ function setLanguage(code) {
   });
 
   // Hero (two entry points: destination lookup / symptom self-assessment)
-  $('hero-badge').textContent = t.hero.badge;
   $('hero-title').innerHTML = t.hero.title;
   $('hero-subtitle').textContent = t.hero.subtitle;
   $('btn-destination-title').textContent = t.hero.ctaTravelTitle;
@@ -1507,8 +1434,6 @@ function setLanguage(code) {
     const el = $(`hero-feature-${i + 1}`);
     if (el) el.textContent = text;
   });
-  $('hero-disclaimer').textContent = t.disclaimer;
-  $('hero-privacy-text').textContent = t.hero.privacy;
   $('btn-privacy').textContent = t.hero.privacyLink;
 
   // Static parts of the wizard
@@ -1521,11 +1446,9 @@ function setLanguage(code) {
   $('mode-toggle').setAttribute('aria-label', t.mode.switch);
 
   // Loading
-  $('loading-sub').textContent = t.loading.sub;
 
   // Static parts of the result page
   $('result-title').textContent = t.result.title;
-  $('result-sub').textContent = t.result.sub;
   $('label-dengue').textContent = t.result.dengue;
   $('label-severe').textContent = t.result.severe;
   $('label-worsening').textContent = t.result.worsening;
@@ -2051,11 +1974,7 @@ function renderQuestion(focusQuestion) {
   });
   card.appendChild(opts);
 
-  const keys = document.createElement('p');
-  keys.className = 'aq-keys';
-  keys.textContent = t.adaptive.keyHint;
-  card.appendChild(keys);
-
+  
   host.replaceChildren(card);
   if (focusQuestion) label.focus({ preventScroll: true });
 }
@@ -2240,18 +2159,6 @@ function renderAdaptive(direction) {
     // notes: stop reason + free-text notes + the way into the full questionnaire
     head = stepHead(t.steps.notes.title, t.steps.notes.sub);
     wrap.appendChild(head);
-    if (ad.stopReason) {
-      const stop = document.createElement('p');
-      stop.className = 'stop-line';
-      const mark = document.createElement('span');
-      mark.className = 'stop-mark';
-      mark.setAttribute('aria-hidden', 'true');
-      mark.textContent = '✓';
-      const key = ad.stopReason === 'cap' ? 'stopCap'
-        : ad.stopReason === 'nomore' ? 'stopNoMore' : 'stopProven';
-      stop.append(mark, document.createTextNode(t.adaptive[key]));
-      wrap.appendChild(stop);
-    }
     renderNotesStep(wrap);
     const more = document.createElement('p');
     more.className = 'aq-more';
@@ -2469,9 +2376,6 @@ function renderResult(data, { animate }) {
   // Text
   $('result-summary').textContent = data.summary || '';
   $('model-note').textContent = data.model_note || '';
-  $('epi-week-line').textContent = data.epi_week
-    ? fmt(t.result.epiWeek, { week: data.epi_week })
-    : '';
   $('disclaimer-bar').textContent = data.disclaimer || t.disclaimer;
 
   // Epidemiological exposure context (rule-based)
@@ -2947,7 +2851,6 @@ function renderDestination() {
   $('dest-submit').textContent = t.dest.submit;
   $('dest-examples-label').textContent = t.dest.examplesLabel;
   $('btn-dest-to-symptoms').textContent = t.dest.toSymptoms;
-  $('dest-loading-sub').textContent = t.dest.loading.sub;
   $('dest-retry').textContent = t.dest.errors.retry;
   $('dest-disclaimer-bar').textContent = (d.data && d.data.disclaimer) || t.disclaimer;
 
@@ -3208,18 +3111,8 @@ function buildExplainPanel(metric, items) {
 
   frag.appendChild(list);
 
-  const caveat = document.createElement('p');
-  caveat.className = 'explain-note';
-  caveat.textContent = ex.caveat;
-  frag.appendChild(caveat);
 
-  if (hasSeasonal) {
-    const seasonal = document.createElement('p');
-    seasonal.className = 'explain-note';
-    seasonal.textContent = ex.seasonal;
-    frag.appendChild(seasonal);
-  }
-
+  
   return frag;
 }
 

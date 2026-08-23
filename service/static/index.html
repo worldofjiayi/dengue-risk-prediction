@@ -7,7 +7,7 @@
   <meta name="description" content="回答症状与病史问题，获得登革热风险参考评分与防护建议。结果仅供参考，不构成医疗诊断。" />
   <meta name="theme-color" content="#0f766e" />
   <link rel="icon" href="data:," />
-  <link rel="stylesheet" href="./style.css?v=3" />
+  <link rel="stylesheet" href="./style.css?v=4" />
 </head>
 <body>
   <!-- Language switcher (fixed to the top right, shared by every view) -->
@@ -37,26 +37,9 @@
         <span class="orb orb-c"></span>
       </div>
       <div class="hero">
-        <div class="hero-badge" id="hero-badge">登革热 · 风险自评</div>
         <h1 class="hero-title" id="hero-title">登革热<br />风险自测</h1>
         <p class="hero-subtitle" id="hero-subtitle">回答症状与病史问题，获得风险参考与防护建议</p>
 
-        <!-- What the product is. Static statements, deliberately not controls: no button,
-             no link, no hover affordance. -->
-        <ul class="hero-features" role="list">
-          <li class="hero-feature">
-            <span class="hero-feature-mark" aria-hidden="true">🦟</span>
-            <span class="hero-feature-text" id="hero-feature-1">针对登革热的风险评估</span>
-          </li>
-          <li class="hero-feature">
-            <span class="hero-feature-mark" aria-hidden="true">📊</span>
-            <span class="hero-feature-text" id="hero-feature-2">基于真实的登革热监测数据</span>
-          </li>
-          <li class="hero-feature">
-            <span class="hero-feature-mark" aria-hidden="true">🌐</span>
-            <span class="hero-feature-text" id="hero-feature-3">提供五种语言</span>
-          </li>
-        </ul>
 
         <!-- Two entry points: check a destination before travel / self-assess symptoms (two intents, deliberately kept apart) -->
         <div class="hero-actions">
@@ -81,9 +64,7 @@
 
       <!-- Footer small print: disclaimer + privacy note -->
       <div class="hero-foot">
-        <p class="hero-disclaimer" id="hero-disclaimer">本结果仅供参考，不构成医疗诊断。如有不适请及时就医。</p>
         <p class="hero-privacy">
-          <span id="hero-privacy-text">无需注册，不收集个人信息；补充说明不会被保存。</span>
           <button id="btn-privacy" class="link-btn" type="button">隐私说明</button>
         </p>
       </div>
@@ -103,6 +84,12 @@
             <span class="wizard-brand" id="wizard-brand">🦟 登革热风险自测</span>
             <span id="step-counter" class="step-counter">第 1 步 / 共 7 步</span>
           </div>
+
+          <ul class="hero-points" id="hero-points">
+            <li>🦟 <span id="hero-feature-1">登革热专用</span></li>
+            <li>📊 <span id="hero-feature-2">真实数据建模</span></li>
+            <li>🌐 <span id="hero-feature-3">五种语言</span></li>
+          </ul>
           <div class="progress" role="progressbar" aria-label="问卷进度"
                aria-valuemin="1" aria-valuemax="7" aria-valuenow="1">
             <div class="progress-track"><div id="progress-fill" class="progress-fill"></div></div>
@@ -137,7 +124,6 @@
           <span class="pulse-core">🦟</span>
         </div>
         <p id="loading-text" class="loading-text" aria-live="polite">正在整理你的作答…</p>
-        <p class="loading-sub" id="loading-sub">请稍候，通常不超过 10 秒</p>
       </div>
     </section>
 
@@ -146,7 +132,6 @@
       <div class="shell result-shell">
         <header class="result-header">
           <h2 class="result-title" id="result-title">评估结果</h2>
-          <p class="result-sub" id="result-sub">基于你提供的症状与病史生成</p>
         </header>
 
         <!-- WHO warning signs notice (rule-based, independent of the model score) -->
@@ -216,7 +201,6 @@
 
           <p id="result-summary" class="result-summary"></p>
           <p id="model-note" class="model-note"></p>
-          <p id="epi-week-line" class="epi-week"></p>
         </div>
 
         <!-- Epidemiological exposure context (rule-based, deliberately not a gauge) -->
@@ -320,7 +304,6 @@
             <span class="pulse-core">🌍</span>
           </div>
           <p id="dest-loading-text" class="loading-text" aria-live="polite"></p>
-          <p id="dest-loading-sub" class="loading-sub"></p>
         </div>
 
         <div class="dest-error" id="dest-error" role="alert" hidden>
@@ -370,6 +353,6 @@
     </div>
   </div>
 
-  <script src="./app.js?v=3" defer></script>
+  <script src="./app.js?v=4" defer></script>
 </body>
 </html>
