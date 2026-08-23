@@ -7,7 +7,7 @@
   <meta name="description" content="回答症状与病史问题，获得登革热风险参考评分与防护建议。结果仅供参考，不构成医疗诊断。" />
   <meta name="theme-color" content="#0f766e" />
   <link rel="icon" href="data:," />
-  <link rel="stylesheet" href="./style.css" />
+  <link rel="stylesheet" href="./style.css?v=4" />
 </head>
 <body>
   <!-- Language switcher (fixed to the top right, shared by every view) -->
@@ -37,9 +37,9 @@
         <span class="orb orb-c"></span>
       </div>
       <div class="hero">
-        <div class="hero-badge" id="hero-badge">登革热 · 风险自评</div>
-        <h1 class="hero-title" id="hero-title">登革热<br />风险自测</h1>
+        <h1 class="hero-title" id="hero-title">登革热风险自测</h1>
         <p class="hero-subtitle" id="hero-subtitle">回答症状与病史问题，获得风险参考与防护建议</p>
+
 
         <!-- Two entry points: check a destination before travel / self-assess symptoms (two intents, deliberately kept apart) -->
         <div class="hero-actions">
@@ -60,13 +60,17 @@
             <span class="btn-arrow" aria-hidden="true">→</span>
           </button>
         </div>
+
+        <ul class="hero-points" id="hero-points">
+          <li>🦟 <span id="hero-feature-1">登革热专用</span></li>
+          <li>📊 <span id="hero-feature-2">真实数据建模</span></li>
+          <li>🌐 <span id="hero-feature-3">五种语言</span></li>
+        </ul>
       </div>
 
       <!-- Footer small print: disclaimer + privacy note -->
       <div class="hero-foot">
-        <p class="hero-disclaimer" id="hero-disclaimer">本结果仅供参考，不构成医疗诊断。如有不适请及时就医。</p>
         <p class="hero-privacy">
-          <span id="hero-privacy-text">无需注册，不收集个人信息；补充说明不会被保存。</span>
           <button id="btn-privacy" class="link-btn" type="button">隐私说明</button>
         </p>
       </div>
@@ -76,6 +80,12 @@
     <section id="view-wizard" class="view" hidden>
       <div class="shell">
         <header class="wizard-header">
+          <!-- Way out of the assessment (back to wherever it was entered from);
+               distinct from btn-prev, which steps backwards inside the wizard -->
+          <button id="btn-wizard-back" class="back-btn" type="button">
+            <span class="back-arrow" aria-hidden="true">←</span>
+            <span id="btn-wizard-back-text">返回</span>
+          </button>
           <div class="wizard-meta">
             <span class="wizard-brand" id="wizard-brand">🦟 登革热风险自测</span>
             <span id="step-counter" class="step-counter">第 1 步 / 共 7 步</span>
@@ -114,7 +124,6 @@
           <span class="pulse-core">🦟</span>
         </div>
         <p id="loading-text" class="loading-text" aria-live="polite">正在整理你的作答…</p>
-        <p class="loading-sub" id="loading-sub">请稍候，通常不超过 10 秒</p>
       </div>
     </section>
 
@@ -123,7 +132,6 @@
       <div class="shell result-shell">
         <header class="result-header">
           <h2 class="result-title" id="result-title">评估结果</h2>
-          <p class="result-sub" id="result-sub">基于你提供的症状与病史生成</p>
         </header>
 
         <!-- WHO warning signs notice (rule-based, independent of the model score) -->
@@ -193,7 +201,6 @@
 
           <p id="result-summary" class="result-summary"></p>
           <p id="model-note" class="model-note"></p>
-          <p id="epi-week-line" class="epi-week"></p>
         </div>
 
         <!-- Epidemiological exposure context (rule-based, deliberately not a gauge) -->
@@ -205,7 +212,6 @@
               <span class="exposure-level" id="exposure-level">—</span>
             </p>
             <p class="exposure-factors" id="exposure-factors"></p>
-            <p class="exposure-caption" id="exposure-caption"></p>
           </div>
         </div>
 
@@ -219,7 +225,6 @@
             </p>
             <p class="travel-place" id="travel-place"></p>
             <p class="travel-season" id="travel-season" hidden></p>
-            <p class="travel-caption" id="travel-caption"></p>
           </div>
         </div>
         <p class="travel-offer" id="travel-offer" hidden>
@@ -235,15 +240,12 @@
             <span class="chat-icon" aria-hidden="true">💬</span>
             <div class="chat-headings">
               <h3 class="chat-title" id="chat-title">追问一下</h3>
-              <p class="chat-sub" id="chat-sub">针对上面的结果提问，AI 助手会用你选择的语言回答</p>
             </div>
           </header>
 
           <div class="chat-chips" id="chat-chips"></div>
 
-          <div class="chat-log" id="chat-log" role="log" aria-live="polite" aria-label="对话记录">
-            <p class="chat-empty" id="chat-empty">先从下面挑一个问题，或者直接输入你的问题。</p>
-          </div>
+          <div class="chat-log" id="chat-log" role="log" aria-live="polite" aria-label="对话记录"></div>
 
           <form class="chat-form" id="chat-form">
             <label class="sr-only" for="chat-input" id="chat-input-label">你的问题</label>
@@ -253,9 +255,12 @@
           </form>
 
           <div class="chat-foot">
+            <!-- The counter belongs to the input; the disclaimer is its own line -->
             <span class="chat-counter" id="chat-counter">0 / 500</span>
-            <span class="chat-note" id="chat-note"></span>
-            <button id="btn-privacy-chat" class="link-btn" type="button">隐私说明</button>
+            <p class="chat-note-row">
+              <span class="chat-note" id="chat-note"></span>
+              <button id="btn-privacy-chat" class="link-btn" type="button">隐私说明</button>
+            </p>
           </div>
         </section>
 
@@ -299,7 +304,6 @@
             <span class="pulse-core">🌍</span>
           </div>
           <p id="dest-loading-text" class="loading-text" aria-live="polite"></p>
-          <p id="dest-loading-sub" class="loading-sub"></p>
         </div>
 
         <div class="dest-error" id="dest-error" role="alert" hidden>
@@ -349,6 +353,6 @@
     </div>
   </div>
 
-  <script src="./app.js" defer></script>
+  <script src="./app.js?v=4" defer></script>
 </body>
 </html>

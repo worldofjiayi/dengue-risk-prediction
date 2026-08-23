@@ -126,30 +126,33 @@ DISCLAIMERS: dict[str, str] = {
 }
 
 # A note on what the model is: a relative score rather than a probability (no intercept
-# plus downsampled training, and not yet calibrated locally)
+# plus downsampled training).
+#
+# The thresholds are still uncalibrated for any local population, but that caveat was
+# dropped from this user-facing string after a design review: on the result page it sat
+# next to the score and read as hedging rather than as information a member of the public
+# could act on. It remains documented where a reader can act on it -- both READMEs, the
+# technical report, and app/ml_model.py's module docstring.
 MODEL_NOTES: dict[str, str] = {
     "zh-CN": (
         "评分为相对风险参考值，非感染概率。模型基于巴西 SINAN 2023–2025 年"
-        "登革热通报数据训练，尚未在本地人群校准。"
+        "登革热通报数据训练。"
     ),
     "zh-TW": (
         "評分為相對風險參考值，非感染機率。模型基於巴西 SINAN 2023–2025 年"
-        "登革熱通報資料訓練，尚未在本地人群校準。"
+        "登革熱通報資料訓練。"
     ),
     "en": (
         "Scores are relative risk indicators, not infection probabilities. The model was "
-        "trained on Brazilian SINAN dengue surveillance data (2023–2025) and has not been "
-        "calibrated for local populations."
+        "trained on Brazilian SINAN dengue surveillance data (2023–2025)."
     ),
     "es": (
         "Las puntuaciones son indicadores de riesgo relativo, no probabilidades de infección. "
-        "El modelo se entrenó con datos de vigilancia de dengue de SINAN Brasil (2023–2025) "
-        "y no está calibrado para poblaciones locales."
+        "El modelo se entrenó con datos de vigilancia de dengue de SINAN Brasil (2023–2025)."
     ),
     "pt": (
         "As pontuações são indicadores de risco relativo, não probabilidades de infecção. "
-        "O modelo foi treinado com dados de vigilância de dengue do SINAN Brasil (2023–2025) "
-        "e não foi calibrado para populações locais."
+        "O modelo foi treinado com dados de vigilância de dengue do SINAN Brasil (2023–2025)."
     ),
 }
 

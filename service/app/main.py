@@ -41,6 +41,19 @@ app = FastAPI(
 )
 
 
+# Static assets are served under stable URLs, and browsers apply heuristic caching
+# when no Cache-Control header is present -- after a deploy, users kept seeing the
+# previous app.js until their cache expired on its own (observed in production).
+# no-cache does not mean "don't cache": it means revalidate before every use, so an
+# unchanged file still answers 304 via its ETag and an updated one is picked up at
+# once. API responses are dynamic and get the same header harmlessly.
+@app.middleware("http")
+async def _revalidate_everything(request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("Cache-Control", "no-cache")
+    return response
+
+
 # Note: the API routes must be registered first and the static directory mounted on "/" last,
 # otherwise it would shadow the API.
 

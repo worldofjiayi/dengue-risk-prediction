@@ -393,19 +393,6 @@ ol {
 .hero > *:nth-child(4) { animation-delay: 0.24s; }
 .hero > *:nth-child(5) { animation-delay: 0.32s; }
 
-.hero-badge {
-  display: inline-block;
-  padding: 6px 16px;
-  border-radius: 999px;
-  font-size: 0.82rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  color: rgba(255, 255, 255, 0.92);
-  background: rgba(255, 255, 255, 0.14);
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  backdrop-filter: blur(8px);
-  margin-bottom: 22px;
-}
 
 .hero-title {
   font-size: clamp(2.5rem, 9vw, 4.2rem);
@@ -418,12 +405,14 @@ ol {
 
 .hero-subtitle {
   max-width: 30rem;
-  margin: 0 auto 34px;
+  margin: 0 auto 30px;
   font-size: clamp(1rem, 3.6vw, 1.2rem);
   color: rgba(255, 255, 255, 0.86);
 }
 
-/* --- Hero's two entry points: check a destination before travel / self-assess symptoms --- */
+/* --- What the product is: three statements, given weight in the hero.
+       Deliberately inert -- no hover, no pointer cursor, nothing that reads as a
+       control sitting next to the two real CTAs below. --- */
 .hero-actions {
   display: flex;
   flex-direction: column;
@@ -533,11 +522,18 @@ ol {
   animation: fade-up 0.7s cubic-bezier(0.22, 1, 0.36, 1) 0.4s both;
 }
 
-.hero-disclaimer {
-  font-size: 0.75rem;
-  line-height: 1.6;
-  color: rgba(255, 255, 255, 0.58);
+.hero-points {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px 22px;
+  margin-top: 34px;
+  padding: 0;
+  list-style: none;
+  font-size: 0.88rem;
+  color: rgba(255, 255, 255, 0.78);
 }
+
 
 .hero-privacy {
   display: inline-flex;
@@ -746,12 +742,6 @@ ol {
 .field-title.req::after {
   content: " *";
   color: var(--red);
-}
-
-.field-hint {
-  margin-top: 3px;
-  font-size: 0.8rem;
-  color: var(--text-3);
 }
 
 /* --- Option cards --- */
@@ -1398,35 +1388,6 @@ ol {
   line-height: 1.6;
 }
 
-.step-note {
-  margin: 14px 0 0;
-  padding: 12px 14px;
-  border-radius: 12px;
-  border-left: 3px solid var(--accent);
-  background: var(--accent-soft);
-  font-size: 0.86rem;
-  line-height: 1.65;
-  color: var(--text-2);
-}
-
-.bulk-btn {
-  display: inline-flex;
-  align-items: center;
-  margin-top: 16px;
-  padding: 7px 14px;
-  min-height: 36px;
-  border: 1px dashed var(--border-strong);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--text-2);
-  font: inherit;
-  font-size: 0.82rem;
-  cursor: pointer;
-  transition: border-color 0.18s, color 0.18s, background 0.18s;
-}
-.bulk-btn:hover { border-color: var(--accent); color: var(--accent-ink); background: var(--accent-soft); }
-.bulk-btn:active { transform: scale(0.97); }
-
 /* ---------- Tri-state question rows ---------- */
 .q-list {
   margin-top: 18px;
@@ -1705,12 +1666,6 @@ ol {
   color: var(--text-3);
 }
 
-.epi-week {
-  margin: 10px 0 0;
-  font-size: 0.75rem;
-  color: var(--text-3);
-  letter-spacing: 0.04em;
-}
 
 /* ---------- Narrow-screen tuning ---------- */
 @media (max-width: 420px) {
@@ -2002,13 +1957,6 @@ ol {
   color: var(--text-2);
 }
 
-.exposure-caption {
-  margin-top: 6px;
-  font-size: 0.72rem;
-  line-height: 1.6;
-  color: var(--text-3);
-}
-
 /* =========================================================
    AI follow-up chat
    ========================================================= */
@@ -2037,12 +1985,6 @@ ol {
 
 .chat-headings { min-width: 0; }
 .chat-title { font-size: 1.05rem; font-weight: 700; }
-
-.chat-sub {
-  font-size: 0.78rem;
-  line-height: 1.55;
-  color: var(--text-3);
-}
 
 .chat-chips {
   display: flex;
@@ -2086,14 +2028,6 @@ ol {
   overflow-y: auto;
   padding: 4px 2px;
   -webkit-overflow-scrolling: touch;
-}
-
-.chat-empty {
-  font-size: 0.82rem;
-  line-height: 1.6;
-  color: var(--text-3);
-  text-align: center;
-  padding: 10px 4px;
 }
 
 .chat-msg {
@@ -2212,20 +2146,29 @@ ol {
   box-shadow: none;
 }
 
+/* The counter belongs to the input above it; the disclaimer is a separate line, never
+   run together with the count. */
 .chat-foot {
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 10px;
+  flex-direction: column;
+  gap: 6px;
   margin-top: 9px;
   font-size: 0.72rem;
   line-height: 1.55;
   color: var(--text-3);
 }
 
-.chat-counter { font-variant-numeric: tabular-nums; flex: 0 0 auto; }
+.chat-counter { align-self: flex-end; font-variant-numeric: tabular-nums; }
 .chat-counter.is-warn { color: var(--amber); font-weight: 650; }
-.chat-note { flex: 1 1 12rem; min-width: 0; }
+
+.chat-note-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.chat-note { min-width: 0; }
 
 .chat-foot .link-btn {
   flex: 0 0 auto;
@@ -2360,108 +2303,6 @@ ol {
   font-weight: 700;
 }
 
-/* ---------- Interval-narrowing visualisation: three tracks ---------- */
-.nr-wrap {
-  margin-top: 20px;
-  text-align: left;
-}
-
-.nr-title {
-  font-size: 0.88rem;
-  font-weight: 750;
-  color: var(--text);
-}
-
-.nr-hint {
-  margin-top: 2px;
-  font-size: 0.74rem;
-  line-height: 1.55;
-  color: var(--text-3);
-}
-
-.nr-tracks {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  margin-top: 14px;
-}
-
-.nr-track { --nr-color: var(--text-3); --nr-ink: var(--text-2); }
-.nr-track.lv-low    { --nr-color: var(--green); --nr-ink: #059669; }
-.nr-track.lv-medium { --nr-color: var(--amber); --nr-ink: #b45309; }
-.nr-track.lv-high   { --nr-color: var(--red);   --nr-ink: #dc2626; }
-
-.nr-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 7px;
-}
-
-.nr-name {
-  font-size: 0.8rem;
-  font-weight: 650;
-  color: var(--text-2);
-}
-
-.nr-val {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 8px;
-  font-variant-numeric: tabular-nums;
-}
-
-.nr-now {
-  font-size: 0.95rem;
-  font-weight: 750;
-  color: var(--nr-ink);
-}
-
-.nr-tag {
-  padding: 2px 9px;
-  border-radius: 999px;
-  font-size: 0.68rem;
-  font-weight: 700;
-  color: var(--accent-ink);
-  background: var(--accent-soft);
-  white-space: nowrap;
-}
-
-.nr-bar {
-  position: relative;
-  height: 10px;
-  border-radius: 999px;
-  background: var(--border);
-}
-
-.nr-band {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  border-radius: 999px;
-  background: rgba(13, 148, 136, 0.24);
-  transition: left 0.55s cubic-bezier(0.22, 1, 0.36, 1),
-    width 0.55s cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 0.4s ease;
-}
-
-.nr-track.is-decided .nr-band { opacity: 0; }
-
-.nr-marker {
-  position: absolute;
-  top: 50%;
-  left: 0;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--nr-color);
-  border: 2.5px solid var(--surface);
-  box-shadow: var(--shadow-sm);
-  transform: translate(-50%, -50%);
-  transition: left 0.55s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.3s ease;
-}
-
 /* ---------- Single-question card ---------- */
 .aq-card {
   margin-top: 18px;
@@ -2485,13 +2326,6 @@ ol {
 }
 
 .aq-label:focus-visible { outline: none; }
-
-.aq-desc {
-  margin-top: 5px;
-  font-size: 0.87rem;
-  line-height: 1.6;
-  color: var(--text-2);
-}
 
 .aq-opts {
   display: flex;
@@ -2605,11 +2439,6 @@ ol {
   .aq-opt { background: rgba(255, 255, 255, 0.04); }
   .aq-opt-yes:hover:not(:disabled) { background: rgba(245, 158, 11, 0.18); color: #fbbf24; }
   .aq-opt-unknown:hover:not(:disabled) { background: rgba(255, 255, 255, 0.1); }
-  .nr-bar { background: rgba(255, 255, 255, 0.12); }
-  .nr-band { background: rgba(45, 212, 191, 0.26); }
-  .nr-track.lv-low    { --nr-ink: #34d399; }
-  .nr-track.lv-medium { --nr-ink: #fbbf24; }
-  .nr-track.lv-high   { --nr-ink: #f87171; }
 }
 
 /* ---------- Smart interview: narrow screen ---------- */
@@ -2617,8 +2446,6 @@ ol {
   .mode-btn { font-size: 0.78rem; }
   .aq-opts { gap: 8px; }
   .aq-opt { min-height: 52px; font-size: 0.92rem; }
-  .nr-name { font-size: 0.76rem; }
-  .nr-now { font-size: 0.9rem; }
 }
 
 /* =========================================================
@@ -2842,18 +2669,6 @@ ol {
 
 .dest-result-title:focus-visible { outline: none; }
 
-/* "There is no score here, and that is deliberate" -- put this line where it is most visible */
-.dest-noscore {
-  margin-top: 10px;
-  padding: 12px 14px;
-  border-left: 3px solid var(--accent);
-  border-radius: 12px;
-  background: var(--accent-soft);
-  font-size: 0.83rem;
-  line-height: 1.65;
-  color: var(--text-2);
-}
-
 .dest-unmatched {
   margin-top: 12px;
   padding: 12px 14px;
@@ -2937,15 +2752,6 @@ ol {
   background: transparent;
   border: 1px dashed var(--border-strong);
   white-space: normal;
-}
-
-.dest-layer-caption {
-  margin-top: 12px;
-  padding-top: 10px;
-  border-top: 1px dashed var(--border-strong);
-  font-size: 0.74rem;
-  line-height: 1.6;
-  color: var(--text-3);
 }
 
 .dest-empty {
@@ -3180,13 +2986,6 @@ ol {
   white-space: nowrap;
 }
 
-.dest-model-note {
-  margin-top: 14px;
-  font-size: 0.75rem;
-  line-height: 1.65;
-  color: var(--text-3);
-}
-
 .dest-cross {
   margin-top: 26px;
   text-align: center;
@@ -3266,13 +3065,6 @@ ol {
   font-size: 0.82rem;
   line-height: 1.65;
   color: var(--text-2);
-}
-
-.travel-caption {
-  margin-top: 6px;
-  font-size: 0.72rem;
-  line-height: 1.6;
-  color: var(--text-3);
 }
 
 .travel-offer {
