@@ -42,8 +42,7 @@ const COMORB_CODES = [
 // Epidemiological exposure: goes down the back end's rule channel, not into the model
 const EXPOSURE_CODES = ['FEVER_CLUSTER', 'CONFIRMED_CASE', 'OUTBREAK_TRAVEL'];
 
-// Field categories with three-state answers (used by generic logic such as counting
-// and bulk-filling "no")
+// Field categories with three-state answers (used by generic logic such as counting)
 const TRI_KINDS = ['symptoms', 'comorbidities', 'exposure'];
 
 // Smart interview (adaptive mode):
@@ -60,13 +59,13 @@ const PLAN_KIND_MAP = { symptom: 'symptoms', comorbidity: 'comorbidities' };
 // The 5 non-binary features in the model contributions (code keeps its own name, no _x)
 const NON_BINARY_FEATS = ['age', 'sex_f', 'day_ill', 'wk_sin', 'wk_cos'];
 
-// The seven-step questionnaire structure (note is a top-level I18N key name)
+// The seven-step questionnaire structure
 const STEPS = [
   { id: 'basic', kind: 'basic' },
   { id: 'common', kind: 'symptoms', codes: ['FEBRE', 'CEFALEIA', 'MIALGIA', 'ARTRALGIA', 'DOR_RETRO', 'DOR_COSTAS'] },
   { id: 'other', kind: 'symptoms', codes: ['NAUSEA', 'VOMITO', 'EXANTEMA', 'CONJUNTVIT', 'ARTRITE'] },
-  { id: 'clinical', kind: 'symptoms', codes: ['PETEQUIA_N', 'LACO', 'LEUCOPENIA'], note: 'clinicalNote' },
-  { id: 'exposure', kind: 'exposure', codes: EXPOSURE_CODES, note: 'exposureNote' },
+  { id: 'clinical', kind: 'symptoms', codes: ['PETEQUIA_N', 'LACO', 'LEUCOPENIA'] },
+  { id: 'exposure', kind: 'exposure', codes: EXPOSURE_CODES },
   { id: 'history', kind: 'comorbidities', codes: COMORB_CODES },
   { id: 'notes', kind: 'notes' },
 ];
@@ -118,6 +117,7 @@ const I18N = {
       badge: '登革热 · 风险自评',
       title: '登革热<br />风险自测',
       subtitle: '回答症状与病史问题，获得风险参考与防护建议',
+      features: ['针对登革热的风险评估', '基于真实的登革热监测数据', '提供五种语言'],
       ctaTravelTitle: '我要去某个地方',
       ctaTravelDesc: '查看目的地的登革热情况',
       ctaSymptomsTitle: '我有症状',
@@ -148,24 +148,20 @@ const I18N = {
         retry: '重试',
       },
       resultTitle: '{location} 的登革热情况',
-      noScore: '这一页刻意不给风险评分：以国家或地区为单位的参考表撑不起一个分数。下面三层信息是背景资料，不是对你个人风险的测量。',
       notMatched: '参考表里没有匹配到「{location}」，因此不显示流行程度等级。下面查到的内容仍会照常列出。',
       layers: {
         reference: {
           title: '地区背景',
           tag: '稳定参考资料',
-          caption: '关于这个地区长期以来的参考知识，变化缓慢，与当下的具体事件无关。',
         },
         who: {
           title: '世界卫生组织通报',
           tag: '官方',
-          caption: '世界卫生组织发布的官方通报。请留意每条的日期——其中有些已是数年前发布的。',
           empty: '这个目的地没有查到世界卫生组织通报。',
         },
         recent: {
           title: '近期报道',
           tag: '网络检索 · 近约三个月',
-          caption: '由模型联网检索约近三个月的信息得到。三层里可靠性最低，只能当作线索，不能当作确认。',
           empty: '没有检索到近期报道。',
         },
       },
@@ -183,7 +179,6 @@ const I18N = {
     travel: {
       label: '旅行背景',
       place: '目的地：{location}',
-      caption: '来自你本次会话中做过的目的地查询。它没有参与上面的评分。',
       level: '流行程度：{level}',
       notMatched: '参考表中没有这个地点',
       offer: '要出门旅行吗？',
@@ -207,16 +202,14 @@ const I18N = {
     brand: '🦟 登革热风险自测',
     stepCounter: '第 {cur} 步 / 共 {total} 步',
     steps: {
-      basic: { title: '基本信息', sub: '这些信息会影响风险评估结果' },
+      basic: { title: '基本信息' },
       common: { title: '常见症状', sub: '最近是否出现以下情况？' },
       other: { title: '其他症状', sub: '继续，还有几项' },
-      clinical: { title: '出血与化验', sub: '需要医生检查的项目' },
-      exposure: { title: '周围环境与暴露', sub: '这几题问的是你身边的情况，不是你的身体' },
-      history: { title: '既往病史', sub: '这些慢性病会提高重症风险' },
+      clinical: { title: '出血与化验', sub: '根据医生检查结果' },
+      exposure: { title: '周围环境与暴露' },
+      history: { title: '既往病史' },
       notes: { title: '补充说明', sub: '还有什么想告诉我们的吗？（选填）' },
     },
-    clinicalNote: '这几项通常需要医生检查或验血才能知道。不清楚就选「不知道」，不影响评估。',
-    exposureNote: '这几题描述的是你周围的环境，而不是你的身体。统计模型并不使用它们（训练数据里没有这些变量），它们只用于判断流行病学背景、并影响给你的建议。',
     fields: {
       age: '年龄', ageUnit: '岁',
       sex: '性别', sexF: '女', sexM: '男',
@@ -224,14 +217,11 @@ const I18N = {
       dayIllZero: '今天刚开始', dayIllNone: '尚无症状',
     },
     answers: { yes: '有', no: '无', unknown: '不知道' },
-    bulkNo: '本页全选「无」',
     answered: '已答 {n}/{total}',
     notes: {
-      label: '补充说明',
-      hint: '可以描述其他症状或情况，系统会自动识别其中提到的症状。最多 500 字。',
       placeholder: '例如：三天前开始发烧，眼睛后面很胀，昨天开始牙龈有点出血…',
     },
-    nav: { prev: '上一步', next: '下一步', submit: '提交评估' },
+    nav: { prev: '上一步', next: '下一步', submit: '提交评估', back: '返回' },
     hints: { sexRequired: '请选择性别后继续' },
     mode: {
       adaptive: '智能问诊（推荐）',
@@ -240,24 +230,12 @@ const I18N = {
     },
     adaptive: {
       stageSafety: '安全筛查',
-      stageSafetySub: '这两个问题每个人都会被问到',
-      stageSafetyNote: '呕吐和皮肤瘀点属于世界卫生组织列出的登革热警示征象，会直接影响就医建议，所以无论之后怎么提问，都会先问每个人这两项。',
       stageLoop: '智能提问',
-      stageLoopSub: '每次只问最有价值的一题，结论一旦确定就停止',
       questionCounter: '第 {n} 题',
-      whyFor: {
-        dengue: '主要为了判断「登革热可能性」',
-        worsening: '主要为了判断「病情加重风险」',
-        severe: '主要为了判断「重症风险」',
-      },
-      trackTitle: '三项结论的可能范围',
-      trackHint: '色带表示评分仍可能落入的区间，每答一题就会收窄；圆点是当前估计。',
-      decided: '已确定',
       stopProven: '剩余问题不会再改变任何结论，可以出结果了。',
       stopCap: '已达到问题数上限，可以出结果了。',
       stopNoMore: '没有更多值得问的问题了，可以出结果了。',
       continueFull: '补充更多问题（转完整问卷）',
-      resultReady: '信息已足够',
       keyHint: '也可以按键盘 1 / 2 / 3 作答',
     },
     loading: {
@@ -286,7 +264,6 @@ const I18N = {
         levels: { low: '低', medium: '中', high: '高' },
         factors: '触发因素：{list}',
         none: '你没有报告周围有相关的暴露情况。',
-        caption: '这是按规则判断的流行病学背景，不是模型输出，也不计入上面的评分。',
         sep: '、',
       },
       epiWeek: '评估周次：第 {week} 周',
@@ -349,15 +326,13 @@ const I18N = {
     },
     chat: {
       title: '追问一下',
-      sub: '针对上面的结果提问，AI 助手会用你选择的语言回答',
-      empty: '先从下面挑一个问题，或者直接输入你想问的。',
       inputLabel: '你的问题',
       placeholder: '输入你的问题…',
       send: '发送',
       typing: 'AI 正在回复…',
       you: '你',
       assistant: 'AI 助手',
-      note: '回答由 AI 生成，可能出错；你的作答摘要会发送给第三方模型接口处理。',
+      note: '回答由 AI 生成，仅供参考，不作为医疗诊断依据。',
       privacyLink: '隐私说明',
       error: 'AI 助手暂时没能回答，请稍后重试。',
       retry: '重试',
@@ -381,6 +356,7 @@ const I18N = {
       badge: '登革熱 · 風險自評',
       title: '登革熱<br />風險自測',
       subtitle: '回答症狀與病史問題，獲得風險參考與防護建議',
+      features: ['針對登革熱的風險評估', '基於真實的登革熱監測資料', '提供五種語言'],
       ctaTravelTitle: '我要去某個地方',
       ctaTravelDesc: '查看目的地的登革熱情況',
       ctaSymptomsTitle: '我有症狀',
@@ -411,24 +387,20 @@ const I18N = {
         retry: '重試',
       },
       resultTitle: '{location} 的登革熱情況',
-      noScore: '這一頁刻意不給風險評分：以國家或地區為單位的參考表撐不起一個分數。下面三層資訊是背景資料，不是對你個人風險的測量。',
       notMatched: '參考表中沒有比對到「{location}」，因此不顯示流行程度等級。下面查到的內容仍會照常列出。',
       layers: {
         reference: {
           title: '地區背景',
           tag: '穩定參考資料',
-          caption: '關於這個地區長期以來的參考知識，變化緩慢，與當下的個別事件無關。',
         },
         who: {
           title: '世界衛生組織通報',
           tag: '官方',
-          caption: '世界衛生組織發布的官方通報。請留意每一條的日期——其中有些已是數年前發布的。',
           empty: '這個目的地沒有查到世界衛生組織通報。',
         },
         recent: {
           title: '近期報導',
           tag: '網路搜尋 · 近約三個月',
-          caption: '由模型連網搜尋約近三個月的資訊而來。三層中可靠性最低，只能當作線索，不能當作確認。',
           empty: '沒有搜尋到近期報導。',
         },
       },
@@ -446,7 +418,6 @@ const I18N = {
     travel: {
       label: '旅行背景',
       place: '目的地：{location}',
-      caption: '來自你這次使用中做過的目的地查詢。它沒有參與上面的評分。',
       level: '流行程度：{level}',
       notMatched: '參考表中沒有這個地點',
       offer: '要出門旅行嗎？',
@@ -470,16 +441,14 @@ const I18N = {
     brand: '🦟 登革熱風險自測',
     stepCounter: '第 {cur} 步 / 共 {total} 步',
     steps: {
-      basic: { title: '基本資料', sub: '這些資訊會影響風險評估結果' },
+      basic: { title: '基本資料' },
       common: { title: '常見症狀', sub: '最近是否出現以下情況？' },
       other: { title: '其他症狀', sub: '繼續，還有幾項' },
-      clinical: { title: '出血與檢驗', sub: '需要醫師檢查的項目' },
-      exposure: { title: '周遭環境與暴露', sub: '這幾題問的是你身邊的狀況，不是你的身體' },
-      history: { title: '過去病史', sub: '這些慢性病會提高重症風險' },
+      clinical: { title: '出血與檢驗', sub: '根據醫師檢查結果' },
+      exposure: { title: '周遭環境與暴露' },
+      history: { title: '過去病史' },
       notes: { title: '補充說明', sub: '還有什麼想告訴我們的嗎？（選填）' },
     },
-    clinicalNote: '這幾項通常需要醫師檢查或抽血才會知道。不清楚就選「不知道」，不影響評估。',
-    exposureNote: '這幾題描述的是你周遭的環境，而不是你的身體。統計模型並不使用它們（訓練資料中沒有這些變項），它們只用來判斷流行病學背景，並影響給你的建議。',
     fields: {
       age: '年齡', ageUnit: '歲',
       sex: '性別', sexF: '女', sexM: '男',
@@ -487,14 +456,11 @@ const I18N = {
       dayIllZero: '今天剛開始', dayIllNone: '尚無症狀',
     },
     answers: { yes: '有', no: '無', unknown: '不知道' },
-    bulkNo: '本頁全選「無」',
     answered: '已答 {n}/{total}',
     notes: {
-      label: '補充說明',
-      hint: '可以描述其他症狀或狀況，系統會自動辨識其中提到的症狀。最多 500 字。',
       placeholder: '例如：三天前開始發燒，眼睛後面很脹，昨天開始牙齦有點出血…',
     },
-    nav: { prev: '上一步', next: '下一步', submit: '送出評估' },
+    nav: { prev: '上一步', next: '下一步', submit: '送出評估', back: '返回' },
     hints: { sexRequired: '請先選擇性別再繼續' },
     mode: {
       adaptive: '智慧問診（推薦）',
@@ -503,24 +469,12 @@ const I18N = {
     },
     adaptive: {
       stageSafety: '安全篩檢',
-      stageSafetySub: '這兩個問題每個人都會被問到',
-      stageSafetyNote: '嘔吐和皮膚瘀點屬於世界衛生組織列出的登革熱警示徵象，會直接影響就醫建議，因此無論之後怎麼提問，都會先詢問每個人這兩項。',
       stageLoop: '智慧提問',
-      stageLoopSub: '每次只問最有價值的一題，結論一旦確定就停止',
       questionCounter: '第 {n} 題',
-      whyFor: {
-        dengue: '主要為了判斷「登革熱可能性」',
-        worsening: '主要為了判斷「病情加重風險」',
-        severe: '主要為了判斷「重症風險」',
-      },
-      trackTitle: '三項結論的可能範圍',
-      trackHint: '色帶表示評分仍可能落入的區間，每答一題就會收窄；圓點是目前的估計。',
-      decided: '已確定',
       stopProven: '剩餘問題不會再改變任何結論，可以出結果了。',
       stopCap: '已達到問題數上限，可以出結果了。',
       stopNoMore: '沒有更多值得問的問題了，可以出結果了。',
       continueFull: '補充更多問題（轉完整問卷）',
-      resultReady: '資訊已足夠',
       keyHint: '也可以按鍵盤 1 / 2 / 3 作答',
     },
     loading: {
@@ -549,7 +503,6 @@ const I18N = {
         levels: { low: '低', medium: '中', high: '高' },
         factors: '觸發因素：{list}',
         none: '你沒有回報周遭有相關的暴露情況。',
-        caption: '這是依規則判斷的流行病學背景，不是模型輸出，也不計入上方的評分。',
         sep: '、',
       },
       epiWeek: '評估週次：第 {week} 週',
@@ -612,15 +565,13 @@ const I18N = {
     },
     chat: {
       title: '追問一下',
-      sub: '針對上面的結果提問，AI 助理會以你選擇的語言回答',
-      empty: '先從下面挑一個問題，或直接輸入你想問的。',
       inputLabel: '你的問題',
       placeholder: '輸入你的問題…',
       send: '送出',
       typing: 'AI 正在回覆…',
       you: '你',
       assistant: 'AI 助理',
-      note: '回答由 AI 產生，可能有誤；你的作答摘要會傳送至第三方模型 API 處理。',
+      note: '回答由 AI 產生，僅供參考，不作為醫療診斷依據。',
       privacyLink: '隱私說明',
       error: 'AI 助理暫時無法回答，請稍後重試。',
       retry: '重試',
@@ -644,6 +595,11 @@ const I18N = {
       badge: 'Dengue · Risk self-check',
       title: 'Dengue Risk<br />Self-Check',
       subtitle: 'Answer a few questions to get a risk indicator and protection advice',
+      features: [
+        'Dengue-specific risk assessment',
+        'Built on real dengue surveillance data',
+        'Available in five languages',
+      ],
       ctaTravelTitle: 'I’m travelling somewhere',
       ctaTravelDesc: 'See the dengue situation at that destination',
       ctaSymptomsTitle: 'I have symptoms',
@@ -674,24 +630,20 @@ const I18N = {
         retry: 'Try again',
       },
       resultTitle: 'Dengue in {location}',
-      noScore: 'There is deliberately no risk score on this page: a country-level reference table cannot support one. Treat the three layers below as background, not as a measurement of your own risk.',
       notMatched: '“{location}” could not be matched in our reference table, so no endemicity level is shown. Anything that was found is still listed below.',
       layers: {
         reference: {
           title: 'Regional background',
           tag: 'Stable reference',
-          caption: 'Long-standing reference knowledge about the region. It changes slowly and is not tied to any current event.',
         },
         who: {
           title: 'World Health Organization notices',
           tag: 'Official',
-          caption: 'Official notices published by the World Health Organization. Check the date on each one — some were published years ago.',
           empty: 'No World Health Organization notice was returned for this destination.',
         },
         recent: {
           title: 'Recent reports',
           tag: 'Web search · last ~3 months',
-          caption: 'Gathered by model web search covering roughly the last three months. The least reliable of the three layers — treat these as leads, not confirmation.',
           empty: 'No recent reports were found.',
         },
       },
@@ -709,7 +661,6 @@ const I18N = {
     travel: {
       label: 'Travel context',
       place: 'Destination: {location}',
-      caption: 'From the destination check you ran earlier in this session. It did not affect the scores above.',
       level: 'Endemicity: {level}',
       notMatched: 'Not in the reference table',
       offer: 'Travelling somewhere?',
@@ -733,16 +684,14 @@ const I18N = {
     brand: '🦟 Dengue Risk Self-Check',
     stepCounter: 'Step {cur} of {total}',
     steps: {
-      basic: { title: 'Basic information', sub: 'These details affect the risk assessment' },
+      basic: { title: 'Basic information' },
       common: { title: 'Common symptoms', sub: 'Have you had any of these recently?' },
       other: { title: 'Other symptoms', sub: 'Almost there — a few more' },
-      clinical: { title: 'Bleeding & lab findings', sub: 'Items that usually require a clinician' },
-      exposure: { title: 'Surroundings & exposure', sub: 'These ask about the people and places around you, not about your body' },
-      history: { title: 'Medical history', sub: 'These conditions raise the risk of severe disease' },
+      clinical: { title: 'Bleeding & lab findings', sub: 'Based on your doctor’s findings' },
+      exposure: { title: 'Surroundings & exposure' },
+      history: { title: 'Medical history' },
       notes: { title: 'Anything else', sub: 'Optional — tell us more in your own words' },
     },
-    clinicalNote: 'These usually require a doctor’s exam or a blood test. If you are not sure, choose "Don’t know" — it will not distort the result.',
-    exposureNote: 'These questions describe your surroundings rather than your own body. The statistical model does not use them — the variables do not exist in its training data. They are used to judge the epidemiological context and to shape the guidance you receive.',
     fields: {
       age: 'Age', ageUnit: 'years',
       sex: 'Sex', sexF: 'Female', sexM: 'Male',
@@ -750,14 +699,11 @@ const I18N = {
       dayIllZero: 'Started today', dayIllNone: 'No symptoms yet',
     },
     answers: { yes: 'Yes', no: 'No', unknown: 'Don’t know' },
-    bulkNo: 'Mark all on this page as "No"',
     answered: 'Answered {n}/{total}',
     notes: {
-      label: 'Additional notes',
-      hint: 'Describe any other symptoms or circumstances — the system will pick up symptoms you mention. Up to 500 characters.',
       placeholder: 'e.g. Fever started three days ago, pressure behind the eyes, gums began bleeding yesterday…',
     },
-    nav: { prev: 'Back', next: 'Next', submit: 'Get my result' },
+    nav: { prev: 'Back', next: 'Next', submit: 'Get my result', back: 'Back' },
     hints: { sexRequired: 'Please select your sex to continue' },
     mode: {
       adaptive: 'Smart interview (recommended)',
@@ -766,24 +712,12 @@ const I18N = {
     },
     adaptive: {
       stageSafety: 'Safety check',
-      stageSafetySub: 'Everyone is asked these two questions',
-      stageSafetyNote: 'Vomiting and petechiae are dengue warning signs listed by the World Health Organization and directly affect the care advice, so they are asked of everyone before anything else.',
       stageLoop: 'Smart questions',
-      stageLoopSub: 'One high-value question at a time — it stops as soon as the conclusions are settled',
       questionCounter: 'Question {n}',
-      whyFor: {
-        dengue: 'mainly to pin down “Dengue likelihood”',
-        worsening: 'mainly to pin down “Risk of worsening”',
-        severe: 'mainly to pin down “Severe-disease risk”',
-      },
-      trackTitle: 'Possible range of each conclusion',
-      trackHint: 'Each band is the range the score can still fall in — it narrows with every answer. The dot is the current estimate.',
-      decided: 'Settled',
       stopProven: 'The remaining questions cannot change any conclusion — your result is ready.',
       stopCap: 'Question limit reached — your result is ready.',
       stopNoMore: 'No further questions are worth asking — your result is ready.',
       continueFull: 'Answer more questions (full questionnaire)',
-      resultReady: 'Enough information collected',
       keyHint: 'You can also press 1 / 2 / 3 on your keyboard',
     },
     loading: {
@@ -812,7 +746,6 @@ const I18N = {
         levels: { low: 'Low', medium: 'Medium', high: 'High' },
         factors: 'Triggered by: {list}',
         none: 'You did not report any relevant exposure around you.',
-        caption: 'Epidemiological context assessed by rule, not model output. It is not part of the scores above.',
         sep: ', ',
       },
       epiWeek: 'Assessment week: week {week}',
@@ -875,15 +808,13 @@ const I18N = {
     },
     chat: {
       title: 'Ask about your result',
-      sub: 'Ask anything about the result above — the AI assistant replies in your chosen language',
-      empty: 'Pick a question below, or type your own.',
       inputLabel: 'Your question',
       placeholder: 'Type your question…',
       send: 'Send',
       typing: 'Assistant is replying…',
       you: 'You',
       assistant: 'Assistant',
-      note: 'Replies are AI-generated and can be wrong. A summary of your answers is sent to a third-party model API.',
+      note: 'Replies are AI-generated, for reference only, and not a basis for medical diagnosis.',
       privacyLink: 'Privacy',
       error: 'The assistant could not answer just now. Please try again.',
       retry: 'Retry',
@@ -907,6 +838,11 @@ const I18N = {
       badge: 'Dengue · Autoevaluación de riesgo',
       title: 'Riesgo de dengue<br />Autoevaluación',
       subtitle: 'Responda unas preguntas y obtenga un indicador de riesgo y consejos de protección',
+      features: [
+        'Evaluación de riesgo específica del dengue',
+        'Basada en datos reales de vigilancia del dengue',
+        'Disponible en cinco idiomas',
+      ],
       ctaTravelTitle: 'Voy a viajar',
       ctaTravelDesc: 'Consulte la situación del dengue en ese destino',
       ctaSymptomsTitle: 'Tengo síntomas',
@@ -937,24 +873,20 @@ const I18N = {
         retry: 'Reintentar',
       },
       resultTitle: 'Dengue en {location}',
-      noScore: 'Esta página no muestra ninguna puntuación de riesgo, y es intencionado: una tabla de referencia por países no puede sustentarla. Use las tres capas siguientes como contexto, no como una medida de su riesgo personal.',
       notMatched: 'No se pudo localizar «{location}» en nuestra tabla de referencia, por lo que no se muestra un nivel de endemicidad. Lo que sí se encontró se indica igualmente más abajo.',
       layers: {
         reference: {
           title: 'Contexto regional',
           tag: 'Referencia estable',
-          caption: 'Conocimiento de referencia consolidado sobre la región. Cambia lentamente y no depende de ningún hecho puntual.',
         },
         who: {
           title: 'Avisos de la Organización Mundial de la Salud',
           tag: 'Oficial',
-          caption: 'Avisos oficiales publicados por la Organización Mundial de la Salud. Fíjese en la fecha de cada uno: algunos se publicaron hace años.',
           empty: 'No se obtuvo ningún aviso de la Organización Mundial de la Salud para este destino.',
         },
         recent: {
           title: 'Informes recientes',
           tag: 'Búsqueda web · últimos ~3 meses',
-          caption: 'Obtenidos mediante búsqueda web del modelo sobre los últimos tres meses aproximadamente. Es la capa menos fiable de las tres: tómelos como pistas, no como confirmación.',
           empty: 'No se encontraron informes recientes.',
         },
       },
@@ -972,7 +904,6 @@ const I18N = {
     travel: {
       label: 'Contexto de viaje',
       place: 'Destino: {location}',
-      caption: 'Procede de la consulta de destino que hizo antes en esta sesión. No ha influido en las puntuaciones anteriores.',
       level: 'Endemicidad: {level}',
       notMatched: 'No figura en la tabla de referencia',
       offer: '¿Va a viajar?',
@@ -996,16 +927,14 @@ const I18N = {
     brand: '🦟 Autoevaluación de dengue',
     stepCounter: 'Paso {cur} de {total}',
     steps: {
-      basic: { title: 'Datos básicos', sub: 'Estos datos influyen en la evaluación del riesgo' },
+      basic: { title: 'Datos básicos' },
       common: { title: 'Síntomas frecuentes', sub: '¿Ha presentado alguno de estos últimamente?' },
       other: { title: 'Otros síntomas', sub: 'Continuemos, faltan pocos' },
-      clinical: { title: 'Sangrado y laboratorio', sub: 'Requieren valoración médica' },
-      exposure: { title: 'Entorno y exposición', sub: 'Estas preguntas son sobre lo que ocurre a su alrededor, no sobre su cuerpo' },
-      history: { title: 'Antecedentes médicos', sub: 'Estas enfermedades aumentan el riesgo de gravedad' },
+      clinical: { title: 'Sangrado y laboratorio', sub: 'Según los hallazgos de su médico' },
+      exposure: { title: 'Entorno y exposición' },
+      history: { title: 'Antecedentes médicos' },
       notes: { title: 'Comentarios', sub: 'Opcional: cuéntenos algo más con sus palabras' },
     },
-    clinicalNote: 'Estos datos suelen requerir revisión médica o análisis de sangre. Si no lo sabe, elija «No sé»: no afectará al resultado.',
-    exposureNote: 'Estas preguntas describen su entorno, no su cuerpo. El modelo estadístico no las utiliza —esas variables no existen en sus datos de entrenamiento—: sirven para valorar el contexto epidemiológico y orientar las recomendaciones que recibe.',
     fields: {
       age: 'Edad', ageUnit: 'años',
       sex: 'Sexo', sexF: 'Mujer', sexM: 'Hombre',
@@ -1013,14 +942,11 @@ const I18N = {
       dayIllZero: 'Comenzaron hoy', dayIllNone: 'Aún sin síntomas',
     },
     answers: { yes: 'Sí', no: 'No', unknown: 'No sé' },
-    bulkNo: 'Marcar todo en esta página como «No»',
     answered: 'Respondidas {n}/{total}',
     notes: {
-      label: 'Comentarios adicionales',
-      hint: 'Describa otros síntomas o circunstancias; el sistema detectará los síntomas mencionados. Máximo 500 caracteres.',
       placeholder: 'Ej.: la fiebre empezó hace tres días, presión detrás de los ojos, ayer comenzó a sangrar la encía…',
     },
-    nav: { prev: 'Atrás', next: 'Siguiente', submit: 'Ver mi resultado' },
+    nav: { prev: 'Atrás', next: 'Siguiente', submit: 'Ver mi resultado', back: 'Volver' },
     hints: { sexRequired: 'Seleccione su sexo para continuar' },
     mode: {
       adaptive: 'Entrevista inteligente (recomendada)',
@@ -1029,24 +955,12 @@ const I18N = {
     },
     adaptive: {
       stageSafety: 'Preguntas de seguridad',
-      stageSafetySub: 'Estas dos preguntas se hacen a todas las personas',
-      stageSafetyNote: 'Los vómitos y las petequias son signos de alarma del dengue según la Organización Mundial de la Salud y afectan directamente a las recomendaciones de atención, por eso se preguntan a todas las personas antes que nada.',
       stageLoop: 'Preguntas inteligentes',
-      stageLoopSub: 'Una pregunta de alto valor cada vez; se detiene en cuanto las conclusiones quedan definidas',
       questionCounter: 'Pregunta {n}',
-      whyFor: {
-        dengue: 'principalmente para precisar la «probabilidad relativa de dengue»',
-        worsening: 'principalmente para precisar el «riesgo de empeoramiento»',
-        severe: 'principalmente para precisar el «riesgo de gravedad»',
-      },
-      trackTitle: 'Rango posible de cada conclusión',
-      trackHint: 'Cada banda es el rango en el que aún puede caer la puntuación; se estrecha con cada respuesta. El punto es la estimación actual.',
-      decided: 'Definido',
       stopProven: 'Las preguntas restantes ya no pueden cambiar ninguna conclusión: su resultado está listo.',
       stopCap: 'Se alcanzó el límite de preguntas: su resultado está listo.',
       stopNoMore: 'No quedan preguntas que valga la pena hacer: su resultado está listo.',
       continueFull: 'Responder más preguntas (cuestionario completo)',
-      resultReady: 'Información suficiente',
       keyHint: 'También puede pulsar 1 / 2 / 3 en el teclado',
     },
     loading: {
@@ -1075,7 +989,6 @@ const I18N = {
         levels: { low: 'Baja', medium: 'Media', high: 'Alta' },
         factors: 'Motivos: {list}',
         none: 'No ha indicado ninguna exposición relevante en su entorno.',
-        caption: 'Contexto epidemiológico determinado por reglas, no es resultado del modelo ni forma parte de las puntuaciones anteriores.',
         sep: ', ',
       },
       epiWeek: 'Semana de evaluación: semana {week}',
@@ -1138,15 +1051,13 @@ const I18N = {
     },
     chat: {
       title: 'Pregunte sobre su resultado',
-      sub: 'Pregunte lo que quiera sobre el resultado anterior; el asistente de IA responde en el idioma elegido',
-      empty: 'Elija una pregunta de abajo o escriba la suya.',
       inputLabel: 'Su pregunta',
       placeholder: 'Escriba su pregunta…',
       send: 'Enviar',
       typing: 'El asistente está respondiendo…',
       you: 'Usted',
       assistant: 'Asistente',
-      note: 'Las respuestas las genera una IA y pueden ser incorrectas. Se envía un resumen de sus respuestas a una API de modelo de terceros.',
+      note: 'Las respuestas las genera una IA, son solo orientativas y no sirven como base para un diagnóstico médico.',
       privacyLink: 'Privacidad',
       error: 'El asistente no ha podido responder ahora mismo. Inténtelo de nuevo.',
       retry: 'Reintentar',
@@ -1170,6 +1081,11 @@ const I18N = {
       badge: 'Dengue · Autoavaliação de risco',
       title: 'Risco de dengue<br />Autoavaliação',
       subtitle: 'Responda a algumas perguntas e receba um indicador de risco e orientações',
+      features: [
+        'Avaliação de risco específica da dengue',
+        'Baseada em dados reais de vigilância da dengue',
+        'Disponível em cinco idiomas',
+      ],
       ctaTravelTitle: 'Vou viajar',
       ctaTravelDesc: 'Veja a situação da dengue nesse destino',
       ctaSymptomsTitle: 'Tenho sintomas',
@@ -1200,24 +1116,20 @@ const I18N = {
         retry: 'Tentar novamente',
       },
       resultTitle: 'Dengue em {location}',
-      noScore: 'Esta página não mostra nenhuma pontuação de risco, e isso é proposital: uma tabela de referência por país não sustenta uma. Use as três camadas abaixo como contexto, não como medida do seu risco pessoal.',
       notMatched: 'Não foi possível localizar «{location}» na nossa tabela de referência, por isso nenhum nível de endemicidade é exibido. O que foi encontrado continua listado abaixo.',
       layers: {
         reference: {
           title: 'Contexto regional',
           tag: 'Referência estável',
-          caption: 'Conhecimento de referência consolidado sobre a região. Muda lentamente e não depende de nenhum acontecimento atual.',
         },
         who: {
           title: 'Comunicados da Organização Mundial da Saúde',
           tag: 'Oficial',
-          caption: 'Comunicados oficiais publicados pela Organização Mundial da Saúde. Observe a data de cada um — alguns foram publicados há anos.',
           empty: 'Nenhum comunicado da Organização Mundial da Saúde foi retornado para este destino.',
         },
         recent: {
           title: 'Relatos recentes',
           tag: 'Busca na web · últimos ~3 meses',
-          caption: 'Obtidos por busca na web feita pelo modelo, cobrindo cerca dos últimos três meses. É a camada menos confiável das três — trate como pistas, não como confirmação.',
           empty: 'Nenhum relato recente foi encontrado.',
         },
       },
@@ -1235,7 +1147,6 @@ const I18N = {
     travel: {
       label: 'Contexto de viagem',
       place: 'Destino: {location}',
-      caption: 'Vem da consulta de destino que você fez antes nesta sessão. Não influenciou as pontuações acima.',
       level: 'Endemicidade: {level}',
       notMatched: 'Não consta na tabela de referência',
       offer: 'Vai viajar?',
@@ -1259,16 +1170,14 @@ const I18N = {
     brand: '🦟 Autoavaliação de dengue',
     stepCounter: 'Etapa {cur} de {total}',
     steps: {
-      basic: { title: 'Dados básicos', sub: 'Estes dados influenciam a avaliação de risco' },
+      basic: { title: 'Dados básicos' },
       common: { title: 'Sintomas comuns', sub: 'Apresentou algum destes recentemente?' },
       other: { title: 'Outros sintomas', sub: 'Vamos continuar, faltam poucos' },
-      clinical: { title: 'Sangramento e exames', sub: 'Itens que costumam exigir avaliação médica' },
-      exposure: { title: 'Ambiente e exposição', sub: 'Estas perguntas são sobre o que acontece ao seu redor, não sobre o seu corpo' },
-      history: { title: 'Histórico médico', sub: 'Estas condições aumentam o risco de gravidade' },
+      clinical: { title: 'Sangramento e exames', sub: 'Conforme os achados do seu médico' },
+      exposure: { title: 'Ambiente e exposição' },
+      history: { title: 'Histórico médico' },
       notes: { title: 'Observações', sub: 'Opcional: conte-nos mais com suas palavras' },
     },
-    clinicalNote: 'Estes itens geralmente exigem exame médico ou de sangue. Se não souber, escolha «Não sei» — isso não prejudica o resultado.',
-    exposureNote: 'Estas perguntas descrevem o seu entorno, não o seu corpo. O modelo estatístico não as utiliza — essas variáveis não existem nos dados de treinamento. Elas servem para avaliar o contexto epidemiológico e orientar as recomendações que você recebe.',
     fields: {
       age: 'Idade', ageUnit: 'anos',
       sex: 'Sexo', sexF: 'Feminino', sexM: 'Masculino',
@@ -1276,14 +1185,11 @@ const I18N = {
       dayIllZero: 'Começaram hoje', dayIllNone: 'Ainda sem sintomas',
     },
     answers: { yes: 'Sim', no: 'Não', unknown: 'Não sei' },
-    bulkNo: 'Marcar tudo nesta página como «Não»',
     answered: 'Respondidas {n}/{total}',
     notes: {
-      label: 'Observações adicionais',
-      hint: 'Descreva outros sintomas ou circunstâncias; o sistema identificará os sintomas mencionados. Até 500 caracteres.',
       placeholder: 'Ex.: a febre começou há três dias, pressão atrás dos olhos, ontem a gengiva começou a sangrar…',
     },
-    nav: { prev: 'Voltar', next: 'Avançar', submit: 'Ver meu resultado' },
+    nav: { prev: 'Voltar', next: 'Avançar', submit: 'Ver meu resultado', back: 'Voltar' },
     hints: { sexRequired: 'Selecione o sexo para continuar' },
     mode: {
       adaptive: 'Entrevista inteligente (recomendada)',
@@ -1292,24 +1198,12 @@ const I18N = {
     },
     adaptive: {
       stageSafety: 'Perguntas de segurança',
-      stageSafetySub: 'Estas duas perguntas são feitas a todas as pessoas',
-      stageSafetyNote: 'Vômito e petéquias são sinais de alarme da dengue listados pela Organização Mundial da Saúde e afetam diretamente as orientações de atendimento, por isso são perguntados a todas as pessoas antes de qualquer outra coisa.',
       stageLoop: 'Perguntas inteligentes',
-      stageLoopSub: 'Uma pergunta de alto valor por vez; para assim que as conclusões estiverem definidas',
       questionCounter: 'Pergunta {n}',
-      whyFor: {
-        dengue: 'principalmente para precisar a «probabilidade relativa de dengue»',
-        worsening: 'principalmente para precisar o «risco de piora»',
-        severe: 'principalmente para precisar o «risco de gravidade»',
-      },
-      trackTitle: 'Faixa possível de cada conclusão',
-      trackHint: 'Cada faixa é o intervalo em que a pontuação ainda pode cair; ela se estreita a cada resposta. O ponto é a estimativa atual.',
-      decided: 'Definido',
       stopProven: 'As perguntas restantes já não podem mudar nenhuma conclusão: seu resultado está pronto.',
       stopCap: 'Limite de perguntas atingido: seu resultado está pronto.',
       stopNoMore: 'Não há mais perguntas que valham a pena: seu resultado está pronto.',
       continueFull: 'Responder mais perguntas (questionário completo)',
-      resultReady: 'Informações suficientes',
       keyHint: 'Você também pode pressionar 1 / 2 / 3 no teclado',
     },
     loading: {
@@ -1338,7 +1232,6 @@ const I18N = {
         levels: { low: 'Baixa', medium: 'Média', high: 'Alta' },
         factors: 'Motivos: {list}',
         none: 'Você não relatou nenhuma exposição relevante ao seu redor.',
-        caption: 'Contexto epidemiológico definido por regra, não é saída do modelo nem entra nas pontuações acima.',
         sep: ', ',
       },
       epiWeek: 'Semana da avaliação: semana {week}',
@@ -1401,15 +1294,13 @@ const I18N = {
     },
     chat: {
       title: 'Pergunte sobre o seu resultado',
-      sub: 'Pergunte o que quiser sobre o resultado acima; o assistente de IA responde no idioma escolhido',
-      empty: 'Escolha uma pergunta abaixo ou escreva a sua.',
       inputLabel: 'Sua pergunta',
       placeholder: 'Escreva sua pergunta…',
       send: 'Enviar',
       typing: 'O assistente está respondendo…',
       you: 'Você',
       assistant: 'Assistente',
-      note: 'As respostas são geradas por IA e podem estar erradas. Um resumo das suas respostas é enviado a uma API de modelo de terceiros.',
+      note: 'As respostas são geradas por IA, servem apenas como referência e não constituem base para diagnóstico médico.',
       privacyLink: 'Privacidade',
       error: 'O assistente não conseguiu responder agora. Tente novamente.',
       retry: 'Tentar novamente',
@@ -1479,7 +1370,6 @@ function freshAdaptive() {
     stage: 'basic',    // basic → safety → exposure → loop → notes
     current: null,     // the current question { kind, code, why }
     loopCount: 0,      // questions answered in the adaptive stage (excluding safety/exposure)
-    bounds: null,      // bounds from the most recent /api/plan
     stopReason: null,  // 'proven' | 'cap' | 'nomore'
     planning: false,   // an /api/plan request is in flight
     planSeq: 0,        // request sequence number, for discarding stale responses
@@ -1490,6 +1380,8 @@ const state = {
   lang: DEFAULT_LANG,
   mode: 'adaptive', // 'adaptive' | 'classic'; init reads this from localStorage
   step: 0,
+  // Which view the assessment was entered from, deciding where its back control goes
+  wizardFrom: 'hero',
   answers: freshAnswers(),
   answered: freshAnsweredSet(),
   adaptive: freshAdaptive(),
@@ -1611,12 +1503,17 @@ function setLanguage(code) {
   $('btn-destination-desc').textContent = t.hero.ctaTravelDesc;
   $('btn-start-text').textContent = t.hero.ctaSymptomsTitle;
   $('btn-start-desc').textContent = t.hero.ctaSymptomsDesc;
+  t.hero.features.forEach((text, i) => {
+    const el = $(`hero-feature-${i + 1}`);
+    if (el) el.textContent = text;
+  });
   $('hero-disclaimer').textContent = t.disclaimer;
   $('hero-privacy-text').textContent = t.hero.privacy;
   $('btn-privacy').textContent = t.hero.privacyLink;
 
   // Static parts of the wizard
   $('wizard-brand').textContent = t.brand;
+  $('btn-wizard-back-text').textContent = t.nav.back;
   $('btn-prev').textContent = t.nav.prev;
   document.querySelector('.progress').setAttribute('aria-label', t.a11y.progress);
   $('mode-adaptive').textContent = t.mode.adaptive;
@@ -1635,14 +1532,11 @@ function setLanguage(code) {
   $('why-dengue').textContent = t.result.explain.why;
   $('why-severe').textContent = t.result.explain.why;
   $('exposure-label').textContent = t.result.exposure.label;
-  $('exposure-caption').textContent = t.result.exposure.caption;
   $('btn-restart').textContent = t.result.restart;
   $('btn-home').textContent = t.result.home;
 
   // Static parts of the chat panel
   $('chat-title').textContent = t.chat.title;
-  $('chat-sub').textContent = t.chat.sub;
-  $('chat-empty').textContent = t.chat.empty;
   $('chat-log').setAttribute('aria-label', t.a11y.chatLog);
   $('chat-input-label').textContent = t.chat.inputLabel;
   $('chat-input').placeholder = t.chat.placeholder;
@@ -1833,20 +1727,14 @@ function renderNotesStep(host) {
   const block = document.createElement('div');
   block.className = 'field-block';
 
-  const label = document.createElement('div');
-  label.className = 'field-label';
-  label.textContent = t.notes.label;
-  const hint = document.createElement('p');
-  hint.className = 'field-hint';
-  hint.textContent = t.notes.hint;
-
   const ta = document.createElement('textarea');
   ta.className = 'notes-input';
   ta.maxLength = 500;
   ta.rows = 5;
   ta.placeholder = t.notes.placeholder;
   ta.value = state.answers.notes;
-  ta.setAttribute('aria-label', t.notes.label);
+  // The step heading is the visible name for this field, so it is also its accessible name
+  ta.setAttribute('aria-label', t.steps.notes.title);
 
   const counter = document.createElement('div');
   counter.className = 'notes-counter';
@@ -1861,7 +1749,7 @@ function renderNotesStep(host) {
   });
   setCount();
 
-  block.append(label, hint, ta, counter);
+  block.append(ta, counter);
   host.appendChild(block);
 }
 
@@ -1876,45 +1764,15 @@ function renderStep(direction) {
   else if (direction === 'back') wrap.classList.add('slide-in-left');
 
   // Heading
-  const head = document.createElement('header');
-  head.className = 'step-head';
-  const h2 = document.createElement('h2');
-  h2.className = 'step-title';
-  h2.tabIndex = -1;
-  h2.textContent = t.steps[step.id].title;
-  const sub = document.createElement('p');
-  sub.className = 'step-sub';
-  sub.textContent = t.steps[step.id].sub;
-  head.append(h2, sub);
+  const head = stepHead(t.steps[step.id].title, t.steps[step.id].sub);
+  const h2 = head.querySelector('.step-title');
   wrap.appendChild(head);
-
-  // Extra notes for this step (clinical items / epidemiological exposure)
-  if (step.note && t[step.note]) {
-    const note = document.createElement('p');
-    note.className = 'step-note';
-    note.textContent = t[step.note];
-    wrap.appendChild(note);
-  }
 
   if (step.kind === 'basic') {
     renderBasicStep(wrap);
   } else if (step.kind === 'notes') {
     renderNotesStep(wrap);
   } else {
-    // Bulk "no" shortcut
-    const bulk = document.createElement('button');
-    bulk.type = 'button';
-    bulk.className = 'bulk-btn';
-    bulk.textContent = t.bulkNo;
-    bulk.addEventListener('click', () => {
-      step.codes.forEach((c) => {
-        state.answers[step.kind][c] = 'no';
-        markAnswered(step.kind, c);
-      });
-      renderStep(null);
-    });
-    wrap.appendChild(bulk);
-
     const list = document.createElement('div');
     list.className = 'q-list';
     step.codes.forEach((code) => list.appendChild(makeTriRow(step.kind, code)));
@@ -2118,6 +1976,7 @@ function pickNext(plan) {
   return null;
 }
 
+/** Step heading. subText is optional: a step with no subtitle gets no empty paragraph. */
 function stepHead(title, subText) {
   const head = document.createElement('header');
   head.className = 'step-head';
@@ -2125,115 +1984,14 @@ function stepHead(title, subText) {
   h2.className = 'step-title';
   h2.tabIndex = -1;
   h2.textContent = title;
-  const sub = document.createElement('p');
-  sub.className = 'step-sub';
-  sub.textContent = subText;
-  head.append(h2, sub);
-  return head;
-}
-
-/** The three "interval narrowing" tracks (dengue / worsening / severe). */
-function buildTracksBlock(title, hint) {
-  const t = T();
-  const wrap = document.createElement('div');
-  wrap.className = 'nr-wrap';
-
-  const h = document.createElement('p');
-  h.className = 'nr-title';
-  h.textContent = title;
-  wrap.appendChild(h);
-
-  if (hint) {
-    const p = document.createElement('p');
-    p.className = 'nr-hint';
-    p.textContent = hint;
-    wrap.appendChild(p);
+  head.appendChild(h2);
+  if (subText) {
+    const sub = document.createElement('p');
+    sub.className = 'step-sub';
+    sub.textContent = subText;
+    head.appendChild(sub);
   }
-
-  const list = document.createElement('div');
-  list.className = 'nr-tracks';
-  METRICS.forEach((m) => {
-    const track = document.createElement('div');
-    track.className = 'nr-track';
-    track.id = `nr-${m}`;
-
-    const head = document.createElement('div');
-    head.className = 'nr-head';
-    const name = document.createElement('span');
-    name.className = 'nr-name';
-    name.textContent = t.result[m];
-    const val = document.createElement('span');
-    val.className = 'nr-val';
-    const now = document.createElement('span');
-    now.className = 'nr-now';
-    now.id = `nr-now-${m}`;
-    now.textContent = '—';
-    const tag = document.createElement('span');
-    tag.className = 'nr-tag';
-    tag.id = `nr-tag-${m}`;
-    tag.textContent = `✓ ${t.adaptive.decided}`;
-    tag.hidden = true;
-    val.append(now, tag);
-    head.append(name, val);
-
-    const bar = document.createElement('div');
-    bar.className = 'nr-bar';
-    const band = document.createElement('span');
-    band.className = 'nr-band';
-    band.id = `nr-band-${m}`;
-    band.style.left = '0%';
-    band.style.width = '100%';
-    const marker = document.createElement('span');
-    marker.className = 'nr-marker';
-    marker.id = `nr-marker-${m}`;
-    marker.hidden = true;
-    bar.append(band, marker);
-
-    track.append(head, bar);
-    list.appendChild(track);
-  });
-  wrap.appendChild(list);
-  return wrap;
-}
-
-/** Update the tracks from the latest bounds: the band's position and width narrow
- *  naturally via CSS transitions. */
-function updateTracks(bounds) {
-  if (!bounds || typeof bounds !== 'object') return;
-  const clamp = (v) => Math.max(0, Math.min(100, Number(v) || 0));
-  METRICS.forEach((m) => {
-    const b = bounds[m];
-    const track = $(`nr-${m}`);
-    if (!track || !b || typeof b !== 'object') return;
-
-    const now = clamp(b.score_now);
-    const lo = Math.min(clamp(b.score_min), now);
-    const hi = Math.max(clamp(b.score_max), now);
-    const decided = b.decided === true;
-
-    track.classList.remove('lv-low', 'lv-medium', 'lv-high');
-    if (['low', 'medium', 'high'].indexOf(b.level_now) !== -1) {
-      track.classList.add(`lv-${b.level_now}`);
-    }
-    track.classList.toggle('is-decided', decided);
-
-    const band = $(`nr-band-${m}`);
-    if (band) {
-      // Decided: the band collapses onto the current value (width to zero, fading out),
-      // leaving only the dot
-      band.style.left = `${decided ? now : lo}%`;
-      band.style.width = `${decided ? 0 : Math.max(0, hi - lo)}%`;
-    }
-    const marker = $(`nr-marker-${m}`);
-    if (marker) {
-      marker.hidden = false;
-      marker.style.left = `${now}%`;
-    }
-    const nowEl = $(`nr-now-${m}`);
-    if (nowEl) nowEl.textContent = now.toFixed(1);
-    const tag = $(`nr-tag-${m}`);
-    if (tag) tag.hidden = !decided;
-  });
+  return head;
 }
 
 /** Render the current question card; with no question, show loading dots or nothing,
@@ -2270,7 +2028,6 @@ function renderQuestion(focusQuestion) {
   const meta = document.createElement('p');
   meta.className = 'aq-meta';
   let metaText = fmt(t.adaptive.questionCounter, { n: ad.loopCount + 1 });
-  if (q.why && t.adaptive.whyFor[q.why]) metaText += ` · ${t.adaptive.whyFor[q.why]}`;
   meta.textContent = metaText;
   card.appendChild(meta);
 
@@ -2279,13 +2036,6 @@ function renderQuestion(focusQuestion) {
   label.tabIndex = -1;
   label.textContent = info.label;
   card.appendChild(label);
-
-  if (info.desc) {
-    const desc = document.createElement('p');
-    desc.className = 'aq-desc';
-    desc.textContent = info.desc;
-    card.appendChild(desc);
-  }
 
   const opts = document.createElement('div');
   opts.className = 'aq-opts';
@@ -2355,9 +2105,6 @@ async function advancePlan() {
   if (state.adaptive !== ad || seq !== ad.planSeq) return;
   ad.planning = false;
   if (state.mode !== 'adaptive' || ad.stage !== 'loop') return;
-
-  if (plan.bounds && typeof plan.bounds === 'object') ad.bounds = plan.bounds;
-  updateTracks(ad.bounds);
 
   const q = pickNext(plan);
   if (plan.can_stop === true) { stopLoop('proven'); return; }
@@ -2468,39 +2215,29 @@ function renderAdaptive(direction) {
     wrap.appendChild(head);
     renderBasicStep(wrap);
   } else if (ad.stage === 'safety') {
-    head = stepHead(t.adaptive.stageSafety, t.adaptive.stageSafetySub);
+    // VOMITO / PETEQUIA_N are WHO warning signs: always asked, of everyone
+    head = stepHead(t.adaptive.stageSafety, null);
     wrap.appendChild(head);
-    const note = document.createElement('p');
-    note.className = 'step-note';
-    note.textContent = t.adaptive.stageSafetyNote;
-    wrap.appendChild(note);
     const list = document.createElement('div');
     list.className = 'q-list';
     SAFETY_CODES.forEach((code) => list.appendChild(makeTriRow('symptoms', code)));
     wrap.appendChild(list);
   } else if (ad.stage === 'exposure') {
-    // Exactly the same source as step 5 of the full questionnaire: same codes, same copy,
-    // same notes
+    // Exactly the same source as step 5 of the full questionnaire: same codes, same copy
     head = stepHead(t.steps.exposure.title, t.steps.exposure.sub);
     wrap.appendChild(head);
-    const note = document.createElement('p');
-    note.className = 'step-note';
-    note.textContent = t.exposureNote;
-    wrap.appendChild(note);
     const list = document.createElement('div');
     list.className = 'q-list';
     EXPOSURE_CODES.forEach((code) => list.appendChild(makeTriRow('exposure', code)));
     wrap.appendChild(list);
   } else if (ad.stage === 'loop') {
-    head = stepHead(t.adaptive.stageLoop, t.adaptive.stageLoopSub);
+    head = stepHead(t.adaptive.stageLoop, null);
     wrap.appendChild(head);
-    wrap.appendChild(buildTracksBlock(t.adaptive.trackTitle, t.adaptive.trackHint));
     const host = document.createElement('div');
     host.id = 'aq-host';
     wrap.appendChild(host);
   } else {
-    // notes: stop reason + final interval + free-text notes + the way into the full
-    // questionnaire
+    // notes: stop reason + free-text notes + the way into the full questionnaire
     head = stepHead(t.steps.notes.title, t.steps.notes.sub);
     wrap.appendChild(head);
     if (ad.stopReason) {
@@ -2515,7 +2252,6 @@ function renderAdaptive(direction) {
       stop.append(mark, document.createTextNode(t.adaptive[key]));
       wrap.appendChild(stop);
     }
-    if (ad.bounds) wrap.appendChild(buildTracksBlock(t.adaptive.resultReady, null));
     renderNotesStep(wrap);
     const more = document.createElement('p');
     more.className = 'aq-more';
@@ -2535,9 +2271,8 @@ function renderAdaptive(direction) {
 
   panel.replaceChildren(wrap);
 
-  // The tracks and question card must be filled in after the DOM is mounted (they rely
-  // on getElementById)
-  if ((ad.stage === 'loop' || ad.stage === 'notes') && ad.bounds) updateTracks(ad.bounds);
+  // The question card must be filled in after the DOM is mounted (it relies on
+  // getElementById)
   if (ad.stage === 'loop') renderQuestion(false);
 
   updateAdaptiveMeta();
@@ -2810,7 +2545,6 @@ function renderExposure(ctx) {
   $('exposure-factors').textContent = names.length
     ? fmt(t.factors, { list: names.join(t.sep) })
     : t.none;
-  $('exposure-caption').textContent = t.caption;
   chip.hidden = false;
 }
 
@@ -2988,8 +2722,9 @@ function renderDestChips() {
   }));
 }
 
-/** One information-layer card: icon + heading + trustworthiness label + body + footnote. */
-function buildLayerCard(variant, icon, title, tag, bodyNodes, caption) {
+/** One information-layer card: icon + heading + trustworthiness label + body.
+ *  The card's own styling (solid vs dashed) is what carries the hierarchy. */
+function buildLayerCard(variant, icon, title, tag, bodyNodes) {
   const sec = document.createElement('section');
   sec.className = `dest-layer layer-${variant}`;
 
@@ -3012,11 +2747,6 @@ function buildLayerCard(variant, icon, title, tag, bodyNodes, caption) {
   sec.appendChild(head);
 
   bodyNodes.forEach((n) => { if (n) sec.appendChild(n); });
-
-  const cap = document.createElement('p');
-  cap.className = 'dest-layer-caption';
-  cap.textContent = caption;
-  sec.appendChild(cap);
   return sec;
 }
 
@@ -3062,8 +2792,7 @@ function buildReferenceLayer(data) {
   }
 
   return buildLayerCard(
-    'reference', '📚', t.layers.reference.title, t.layers.reference.tag,
-    body, t.layers.reference.caption,
+    'reference', '📚', t.layers.reference.title, t.layers.reference.tag, body,
   );
 }
 
@@ -3118,8 +2847,7 @@ function buildWhoLayer(data) {
   }
 
   return buildLayerCard(
-    'who', '🏛️', t.layers.who.title, t.layers.who.tag,
-    body, t.layers.who.caption,
+    'who', '🏛️', t.layers.who.title, t.layers.who.tag, body,
   );
 }
 
@@ -3156,8 +2884,7 @@ function buildRecentLayer(data) {
   }
 
   return buildLayerCard(
-    'recent', '🔎', t.layers.recent.title, t.layers.recent.tag,
-    body, t.layers.recent.caption,
+    'recent', '🔎', t.layers.recent.title, t.layers.recent.tag, body,
   );
 }
 
@@ -3183,12 +2910,6 @@ function renderDestResults() {
   title.textContent = fmt(t.dest.resultTitle, { location });
   host.appendChild(title);
 
-  // This page has no score, and that is deliberate -- say so up front
-  const noScore = document.createElement('p');
-  noScore.className = 'dest-noscore';
-  noScore.textContent = t.dest.noScore;
-  host.appendChild(noScore);
-
   // No match in the reference table: say so, and do not guess the endemicity
   if (data.matched !== true) {
     const un = document.createElement('p');
@@ -3211,14 +2932,6 @@ function renderDestResults() {
   // Sources: WHO official / web search, labelled by group, all opening in a new tab
   const sources = buildSourcesBlock(data.sources, 'dest-sources');
   if (sources) host.appendChild(sources);
-
-  const modelNote = String(data.model_note == null ? '' : data.model_note).trim();
-  if (modelNote) {
-    const p = document.createElement('p');
-    p.className = 'dest-model-note';
-    p.textContent = modelNote;
-    host.appendChild(p);
-  }
 }
 
 /** Render entry point for the whole destination view; on a language change it re-runs in
@@ -3391,7 +3104,6 @@ function renderTravelContext() {
   seasonEl.textContent = season;
   seasonEl.hidden = !season;
 
-  $('travel-caption').textContent = t.travel.caption;
   card.hidden = false;
 }
 
@@ -3675,14 +3387,8 @@ function typingBubble() {
 }
 
 function renderChatLog() {
-  const t = T().chat;
   const log = $('chat-log');
-  const empty = $('chat-empty');
-  empty.textContent = t.empty;
-  empty.hidden = state.chat.messages.length > 0 || state.chat.sending;
-
-  const nodes = [empty];
-  state.chat.messages.forEach((m) => nodes.push(chatBubble(m)));
+  const nodes = state.chat.messages.map(chatBubble);
   if (state.chat.sending) nodes.push(typingBubble());
   log.replaceChildren(...nodes);
   log.scrollTop = log.scrollHeight;
@@ -3800,16 +3506,32 @@ function resetWizard() {
   renderWizard(null);
 }
 
+/** Start a fresh assessment, remembering where its back control should return to. */
+function openWizard(from) {
+  state.wizardFrom = from === 'destination' ? 'destination' : 'hero';
+  resetWizard();
+  showView('wizard');
+}
+
+/** Leave the assessment entirely (the counterpart of the destination page's back
+ *  control). btn-prev still steps backwards *inside* the wizard. */
+function leaveWizard() {
+  if (state.wizardFrom === 'destination') {
+    renderDestination();
+    showView('destination');
+    return;
+  }
+  showView('hero');
+}
+
 function init() {
   state.mode = detectMode();
   updateModeToggle();
   setLanguage(detectLang());
   updateChatCounter();
 
-  $('btn-start').addEventListener('click', () => {
-    resetWizard();
-    showView('wizard');
-  });
+  $('btn-start').addEventListener('click', () => openWizard('hero'));
+  $('btn-wizard-back').addEventListener('click', leaveWizard);
 
   // ---- Destination lookup (the second path) ----
   $('btn-destination').addEventListener('click', () => openDestination('hero'));
@@ -3832,10 +3554,7 @@ function init() {
 
   // Destination page -> symptom self-assessment: two distinct intents, kept explicitly
   // separate rather than sharing one flow
-  $('btn-dest-to-symptoms').addEventListener('click', () => {
-    resetWizard();
-    showView('wizard');
-  });
+  $('btn-dest-to-symptoms').addEventListener('click', () => openWizard('destination'));
 
   // Result page -> destination lookup (the small entry point shown before any lookup)
   $('btn-travel-offer').addEventListener('click', () => openDestination('result'));
@@ -3874,10 +3593,9 @@ function init() {
     answerCurrent(e.key === '1' ? 'yes' : e.key === '2' ? 'no' : 'unknown');
   });
 
-  $('btn-restart').addEventListener('click', () => {
-    resetWizard();
-    showView('wizard');
-  });
+  // Restarting discards the previous result, so its back control goes home, not back
+  // to a result page that no longer exists
+  $('btn-restart').addEventListener('click', () => openWizard('hero'));
 
   $('btn-home').addEventListener('click', () => {
     lastResult = null;
