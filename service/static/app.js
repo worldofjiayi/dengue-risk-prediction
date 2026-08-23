@@ -257,7 +257,7 @@ const I18N = {
       },
       warning: {
         title: '出现登革热警示征象',
-        body: '你报告了 {signs}，这属于世界卫生组织列出的登革热警示征象。无论上方评分高低，都建议尽快就医评估。',
+        body: '你报告了 {signs}，这属于世界卫生组织列出的登革热警示征象。无论评分高低，都建议尽快就医评估。',
         sep: '、',
       },
       restart: '重新评估',
@@ -484,7 +484,7 @@ const I18N = {
       },
       warning: {
         title: '出現登革熱警示徵象',
-        body: '你回報了 {signs}，這屬於世界衛生組織列出的登革熱警示徵象。無論上方評分高低，都建議盡快就醫評估。',
+        body: '你回報了 {signs}，這屬於世界衛生組織列出的登革熱警示徵象。無論評分高低，都建議盡快就醫評估。',
         sep: '、',
       },
       restart: '重新評估',
@@ -711,7 +711,7 @@ const I18N = {
       },
       warning: {
         title: 'Dengue warning sign present',
-        body: 'You reported {signs}, which the World Health Organization lists as a dengue warning sign. Regardless of the scores above, you should seek medical assessment promptly.',
+        body: 'You reported {signs}, which the World Health Organization lists as a dengue warning sign. Regardless of the scores, you should seek medical assessment promptly.',
         sep: ', ',
       },
       restart: 'Start over',
@@ -938,7 +938,7 @@ const I18N = {
       },
       warning: {
         title: 'Signo de alarma de dengue presente',
-        body: 'Ha indicado {signs}, que la Organización Mundial de la Salud considera un signo de alarma del dengue. Independientemente de las puntuaciones anteriores, conviene buscar valoración médica cuanto antes.',
+        body: 'Ha indicado {signs}, que la Organización Mundial de la Salud considera un signo de alarma del dengue. Independientemente de las puntuaciones, conviene buscar valoración médica cuanto antes.',
         sep: ', ',
       },
       restart: 'Empezar de nuevo',
@@ -1165,7 +1165,7 @@ const I18N = {
       },
       warning: {
         title: 'Sinal de alarme de dengue presente',
-        body: 'Você relatou {signs}, que a Organização Mundial da Saúde considera um sinal de alarme da dengue. Independentemente das pontuações acima, procure avaliação médica o quanto antes.',
+        body: 'Você relatou {signs}, que a Organização Mundial da Saúde considera um sinal de alarme da dengue. Independentemente das pontuações, procure avaliação médica o quanto antes.',
         sep: ', ',
       },
       restart: 'Recomeçar',
