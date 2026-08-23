@@ -403,13 +403,6 @@ ol {
   margin-bottom: 16px;
 }
 
-.hero-subtitle {
-  max-width: 30rem;
-  margin: 0 auto 30px;
-  font-size: clamp(1rem, 3.6vw, 1.2rem);
-  color: rgba(255, 255, 255, 0.86);
-}
-
 /* --- What the product is: three statements, given weight in the hero.
        Deliberately inert -- no hover, no pointer cursor, nothing that reads as a
        control sitting next to the two real CTAs below. --- */
