@@ -114,7 +114,7 @@ const I18N = {
     langLabel: '选择语言',
     a11y: { progress: '问卷进度', chatLog: '对话记录' },
     hero: {
-      title: '登革热<br />风险自测',
+      title: '登革热风险自测',
       features: ['登革热专用', '真实数据建模', '五种语言'],
       ctaTravelTitle: '我要去某个地方',
       ctaTravelDesc: '查看目的地的登革热情况',
@@ -340,7 +340,7 @@ const I18N = {
     langLabel: '選擇語言',
     a11y: { progress: '問卷進度', chatLog: '對話紀錄' },
     hero: {
-      title: '登革熱<br />風險自測',
+      title: '登革熱風險自測',
       features: ['登革熱專用', '真實數據建模', '五種語言'],
       ctaTravelTitle: '我要去某個地方',
       ctaTravelDesc: '查看目的地的登革熱情況',
@@ -566,7 +566,7 @@ const I18N = {
     langLabel: 'Select language',
     a11y: { progress: 'Questionnaire progress', chatLog: 'Conversation' },
     hero: {
-      title: 'Dengue Risk<br />Self-Check',
+      title: 'Dengue Risk Self-Check',
       features: ['Dengue-specific', 'Built on real data', 'Five languages'],
       ctaTravelTitle: 'I’m travelling somewhere',
       ctaTravelDesc: 'See the dengue situation at that destination',
@@ -792,7 +792,7 @@ const I18N = {
     langLabel: 'Seleccionar idioma',
     a11y: { progress: 'Progreso del cuestionario', chatLog: 'Conversación' },
     hero: {
-      title: 'Riesgo de dengue<br />Autoevaluación',
+      title: 'Autoevaluación de riesgo de dengue',
       features: ['Específico para dengue', 'Basado en datos reales', 'Cinco idiomas'],
       ctaTravelTitle: 'Voy a viajar',
       ctaTravelDesc: 'Consulte la situación del dengue en ese destino',
@@ -1018,7 +1018,7 @@ const I18N = {
     langLabel: 'Selecionar idioma',
     a11y: { progress: 'Progresso do questionário', chatLog: 'Conversa' },
     hero: {
-      title: 'Risco de dengue<br />Autoavaliação',
+      title: 'Autoavaliação de risco de dengue',
       features: ['Específico para dengue', 'Baseado em dados reais', 'Cinco idiomas'],
       ctaTravelTitle: 'Vou viajar',
       ctaTravelDesc: 'Veja a situação da dengue nesse destino',
@@ -1419,7 +1419,7 @@ function setLanguage(code) {
   });
 
   // Hero (two entry points: destination lookup / symptom self-assessment)
-  $('hero-title').innerHTML = t.hero.title;
+  $('hero-title').textContent = t.hero.title;
   $('btn-destination-title').textContent = t.hero.ctaTravelTitle;
   $('btn-destination-desc').textContent = t.hero.ctaTravelDesc;
   $('btn-start-text').textContent = t.hero.ctaSymptomsTitle;
