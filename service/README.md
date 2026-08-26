@@ -1,7 +1,7 @@
 # Dengue Risk Self-Assessment — Web Service
 
 FastAPI service that puts the dengue models from [`../model/`](../model/) in front of the public:
-a six-step questionnaire, three relative-risk scores, and LLM-generated guidance in five languages.
+a seven-step questionnaire, three relative-risk scores, and LLM-generated guidance in five languages.
 
 **Live:** http://35.88.114.45
 
@@ -107,8 +107,9 @@ Every symptom and comorbidity is answered **yes / no / don't know**, encoded `ye
 
 This is not a shortcut. SINAN codes `1 = yes`, `2 = no`, `9 = unknown`, and the training pipeline's
 `(df[c] == "1")` collapses "no" and "unknown" to the same value. Reproducing that convention keeps
-inference faithful to training — and it matters in practice, because leukopenia and the tourniquet
-test are among the strongest predictors and no member of the public knows their own values.
+inference faithful to training — and it matters in practice: leukopenia, the single strongest
+severity predictor, is a laboratory finding, and the tourniquet test is a clinical manoeuvre, so
+no member of the public knows either without having been examined.
 
 ### Scoring
 
@@ -901,7 +902,7 @@ Package locally, excluding secrets and local state:
 ```bash
 cd ..                       # repository root
 tar czf /tmp/jiayi.tar.gz --exclude=.venv --exclude=__pycache__ --exclude='*.pyc' \
-  --exclude=.pytest_cache --exclude=.git --exclude=data --exclude='.env' \
+  --exclude=.pytest_cache --exclude=.git --exclude=service/data --exclude=model/data --exclude='.env' \
   --exclude='*.pem' --exclude=account.txt model service
 scp -i ~/.ssh/your-key.pem /tmp/jiayi.tar.gz ubuntu@<PUBLIC_IP>:/tmp/
 ```

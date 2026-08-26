@@ -55,3 +55,9 @@ model/data/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Office lock files (opening tracked .docx/.pptx on Windows drops these)
+~$*
+
+# Local deliverables staging (never tracked)
+/交付物/
