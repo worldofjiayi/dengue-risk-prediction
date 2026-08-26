@@ -68,8 +68,10 @@ Figures: [`model/figures/`](model/figures/)
 
 **Reports.** The full English technical report lives at
 [`docs/technical-report.pdf`](docs/technical-report.pdf)
-([HTML source](docs/technical-report.html)); a Chinese project report, covering the same ground
-plus deployment and billing operations, at [`docs/项目报告.pdf`](docs/项目报告.pdf). Research
+([HTML source](docs/technical-report.html)). A formal project delivery report, covering the same
+ground plus deployment and billing operations, is available in English
+([`docs/project-report.pdf`](docs/project-report.pdf)) and Chinese
+([`docs/项目报告.pdf`](docs/项目报告.pdf)). Research
 artifacts under `model/` intentionally keep their original Chinese filenames; the directory
 tables in [`model/README.md`](model/README.md) give an English description of each file.
 
