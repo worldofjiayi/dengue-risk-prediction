@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "If you use this model, code, or the reported validation results, please cite this repository."
+title: "Dengue Risk Prediction: From Surveillance Data to a Deployed Self-Assessment Tool"
+type: software
+authors:
+  - family-names: Chen
+    given-names: Jiayi
+    email: jiayichennbshangtian@yahoo.com
+repository-code: "https://github.com/worldofjiayi/dengue-risk-prediction"
+url: "http://35.88.114.45"
+version: 1.0.0
+date-released: 2026-08-23
+keywords:
+  - dengue
+  - epidemiology
+  - risk prediction
+  - logistic regression
+  - public health
+  - SINAN
+abstract: >-
+  Interpretable dengue risk models trained on 9.45 million notification records
+  from Brazil's national surveillance system (SINAN, 2023-2025), externally
+  validated against the Lancet Global Health IDAMS model, and deployed as a
+  multilingual public self-assessment web service.

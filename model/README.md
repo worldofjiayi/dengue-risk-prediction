@@ -4,7 +4,8 @@ Interpretable dengue risk models built on **9,449,900 cleaned notification recor
 national notifiable disease surveillance system (SINAN, 2023–2025), with external validation
 against the **IDAMS** model published in *Lancet Global Health* 2023.
 
-> A Chinese-language version of this document is preserved at [`README.zh-CN.md`](README.zh-CN.md).
+> A Chinese-language edition of this document, adapted from the original project share package,
+> is preserved at [`README.zh-CN.md`](README.zh-CN.md).
 
 ---
 
@@ -14,7 +15,7 @@ against the **IDAMS** model published in *Lancet Global Health* 2023.
 |---|---|
 | [`code/`](code/) | The three-stage pipeline: feature engineering → model fitting → external validation |
 | [`results/`](results/) | Fitted coefficients and metrics (`模型结果_三模型指标与系数.json`), IDAMS validation output (`模型结果_IDAMS校验.json`) |
-| [`figures/`](figures/) | Publication-ready figures (ROC curves, coefficient plots, gradients) |
+| [`figures/`](figures/) | Six publication-ready figures (Chinese filenames): 图1 ROC curves · 图2 Model B coefficients · 图3 IDAMS coefficient-direction agreement (plotted from an earlier training run; directions unchanged) · 图4 day-of-illness AUC gradient · 图5 IDAMS calculator transfer ladder · 图6 risk-tier distribution and severity gradient |
 | [`reports/`](reports/) | Full methods report, project record, and teaching slides (Chinese) |
 
 The fitted coefficients in `results/` are the sole artefact consumed by the deployed service —
@@ -25,11 +26,11 @@ see [`../service/`](../service/).
 ## Three findings
 
 **1. Severity is predictable.** Model B2 reaches **AUC 0.810**. The dominant drivers are
-leukopenia and comorbidity burden (haematological disease, renal disease, autoimmune disease,
-diabetes, hypertension).
+haematological comorbidity and leukopenia (B2 coefficients 1.53 and 1.40), followed by renal
+and autoimmune disease, diabetes, and hypertension.
 
 **2. "Is this dengue?" is hard to learn — and the obstacle is the data.** Model A reaches only
-0.686. SINAN has no genuine non-dengue febrile control group: patients are notified *because*
+AUC 0.686. SINAN has no genuine non-dengue febrile control group: patients are notified *because*
 dengue is suspected, so there are no true negatives. No change of algorithm can recover
 information the sampling frame never captured.
 
@@ -37,7 +38,7 @@ information the sampling frame never captured.
 calculator directly to Brazilian data dropped AUC from the original 0.75–0.86 to **0.617**, even
 though every overlapping coefficient had the correct sign. Its score nevertheless increases
 monotonically with final severity (high-risk tier: 9% of ordinary cases → 24% of severe cases),
-which supports positioning it as a **triage aid** rather than a diagnostic tool.
+supporting its use as a **triage aid** rather than a diagnostic tool.
 
 ---
 
@@ -58,8 +59,9 @@ which supports positioning it as a **triage aid** rather than a diagnostic tool.
 
 ### Why downsampling
 
-Severe cases are roughly 0.15% of confirmed dengue. Trained directly, a model that always predicts
-"not severe" scores 99.8% accuracy while catching nothing. The pipeline keeps every minority-class
+Severe cases are roughly 0.15% of confirmed dengue, so on the raw class balance a classifier can
+score 99.8% accuracy by never predicting "severe", while catching no severe case at all. The
+pipeline keeps every minority-class
 record and randomly subsamples the majority class, then additionally applies
 `class_weight="balanced"`.
 
@@ -89,12 +91,14 @@ service reproduces this convention exactly.
 | Check | Result |
 |---|---|
 | ① Coefficient direction agreement | ✅ **Passed** — all 4 overlapping variables agree with IDAMS (4/4) |
-| ② Day-of-illness gradient | ❌ **Not replicated** — IDAMS rises with illness duration (0.75 → 0.86); ours is flat (0.65–0.67) |
+| ② Day-of-illness gradient | ❌ **Not replicated** — IDAMS rises with illness duration (0.75 → 0.86); our locally trained Model A stays flat (0.65–0.67 across days; see `figures/图4`) |
 | ③ Whole-calculator transfer | ⚠ **Degraded but usable** — AUC 0.617 (direct transfer) < 0.650 (local refit) < 0.668 (full feature set) |
 
-Finding ② is an informative negative result. SINAN lacks the variables carrying IDAMS's strongest
-late-stage discrimination (mucosal bleeding, skin flushing), and records symptoms once at
-notification rather than through daily follow-up.
+Finding ② is an informative negative result. SINAN collects neither serial temperature nor
+several IDAMS discriminators (cough, rhinorrhoea, skin flushing), its petechiae field is only a
+rough proxy for IDAMS's skin-bleeding variable (whose odds ratio climbs from 2.75 to 11.13
+across days 2–5), and symptoms are recorded once at notification rather than through daily
+follow-up.
 
 ---
 
@@ -142,7 +146,7 @@ Intermediate files are written to `/tmp/`; final outputs are `/tmp/full_results.
 | 2023 | 1.646 M | 1.577 M | 1,549 |
 | 2024 | 6.565 M | 6.288 M | 8,226 |
 | 2025 | 1.645 M | 1.585 M | 2,535 |
-| **Total** | **9.856 M** | **9.4499 M** | **12,310** |
+| **Total** | **9.856 M** | **9.450 M** | **12,310** |
 
 The 2024 anomaly is real: Brazil experienced its most severe recorded dengue epidemic that year.
 

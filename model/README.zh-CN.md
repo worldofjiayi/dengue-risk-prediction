@@ -1,4 +1,4 @@
-# 登革热风险预测模型 — 项目分享包
+# 登革热风险预测模型 — 研究说明
 
 基于巴西 SINAN 监测系统 2023–2025 年 **944.99 万条**登革热通报数据构建的可解释风险预测模型,
 并与 **Lancet Global Health 2023 (IDAMS)** 已发表模型进行外部校验。
@@ -9,20 +9,21 @@
 
 | 如果你想… | 打开 |
 |---|---|
-| **快速了解整个项目**(推荐起点) | `报告/登革热风险预测模型_项目全记录.docx` |
-| 深入了解方法学细节 | `报告/方法与结果报告_登革热风险模型.docx` |
-| 用于教学讲解 | `报告/方法讲义_登革热风险模型.pptx` |
-| 复现分析 | `代码/` (见下方运行说明) |
-| 直接取图放进幻灯片/论文 | `图表/` |
+| **快速了解整个项目**(推荐起点) | `reports/登革热风险预测模型_项目全记录.docx` |
+| 深入了解方法学细节 | `reports/方法与结果报告_登革热风险模型.docx` |
+| 用于教学讲解 | `reports/方法讲义_登革热风险模型.pptx` |
+| 查看拟合系数与校验数值 | `results/模型结果_三模型指标与系数.json` · `results/模型结果_IDAMS校验.json` |
+| 复现分析 | `code/` (见下方运行说明) |
+| 直接取图放进幻灯片/论文 | `figures/` |
 
 ---
 
 ## 核心结论(三句话)
 
-1. **重症是可预测的。** 重症模型 AUC = **0.810**,核心驱动因素是**白细胞减少**与**合并症**
-   (血液病、肾病、自身免疫病、糖尿病、高血压)。
+1. **重症是可预测的。** 重症模型 AUC = **0.810**,核心驱动因素是**血液病合并症**与
+   **白细胞减少**(B2 系数 1.53 与 1.40),其次是肾病、自身免疫病、糖尿病、高血压。
 
-2. **"是不是登革热"难以学习。** 模型 AUC 仅 0.686 —— 瓶颈不在算法,而在数据:
+2. **"是不是登革热"难以学习。** 模型 A 的 AUC 仅 0.686 —— 瓶颈不在算法,而在数据:
    SINAN 缺乏真正的"非登革热发热"对照组(无真阴性)。
 
 3. **已发表模型跨人群使用必须重新校准。** IDAMS 计算器直接迁移到巴西数据后
@@ -50,11 +51,12 @@
 | 校验 | 结果 |
 |---|---|
 | ① 系数方向一致性 | ✅ **通过** — 4 个重叠变量全部与 IDAMS 同向 (4/4) |
-| ② 发病天数梯度 | ❌ **未复现** — IDAMS 随病程上升 (0.75→0.86),本项目持平 (0.65–0.67) |
+| ② 发病天数梯度 | ❌ **未复现** — IDAMS 随病程上升 (0.75→0.86),本项目本地训练的模型 A 持平 (0.65–0.67,见 `figures/图4`) |
 | ③ 计算器整体迁移 | ⚠ **打折可用** — AUC 0.617(直接迁移)< 0.650(本地重训)< 0.668(全特征) |
 
-②未复现是**有信息量的负面结果**:SINAN 缺少 IDAMS 后期最强的判别变量
-(皮肤/黏膜出血、皮肤潮红),且症状为通报时一次性记录、非逐日随访。
+②未复现是**有信息量的负面结果**:SINAN 既无连续体温,也缺 IDAMS 的若干判别变量
+(咳嗽、流涕、皮肤潮红),瘀点字段只是 IDAMS 皮肤出血变量(天数 2–5 的 OR 从 2.75 升到
+11.13)的粗略代理,且症状为通报时一次性记录、非逐日随访。
 
 ---
 
@@ -71,17 +73,17 @@ pip install pandas numpy scikit-learn pyarrow matplotlib
 ### 运行顺序
 ```bash
 # 1. 特征工程(逐年运行)
-python3 01_prepare_data.py 2023 /path/to/DENGBR23.csv
-python3 01_prepare_data.py 2024 /path/to/DENGBR24.csv --chunked   # 656万行,需分片
-python3 01_prepare_data.py 2025 /path/to/DENGBR25.csv
+python3 code/01_prepare_data.py 2023 /path/to/DENGBR23.csv
+python3 code/01_prepare_data.py 2024 /path/to/DENGBR24.csv --chunked   # 656万行,需分片
+python3 code/01_prepare_data.py 2025 /path/to/DENGBR25.csv
 
 # 2. 拟合三个模型
-python3 02_fit_models.py A
-python3 02_fit_models.py B
-python3 02_fit_models.py B2
+python3 code/02_fit_models.py A
+python3 code/02_fit_models.py B
+python3 code/02_fit_models.py B2
 
 # 3. IDAMS 外部校验
-python3 03_idams_validation.py
+python3 code/03_idams_validation.py
 ```
 
 中间文件写入 `/tmp/`,结果为 `/tmp/full_results.json` 与 `/tmp/idams_eval.json`。

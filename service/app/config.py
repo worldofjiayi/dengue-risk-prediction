@@ -27,16 +27,14 @@ class Settings(BaseSettings):
     deepseek_model: str = "deepseek-chat"
     deepseek_timeout: float = 60.0  # DeepSeek request timeout (seconds)
 
-    # ML model configuration: when empty, or the file does not exist, the
-    # built-in heuristic mock model is used instead.
-    ml_model_path: str = ""
-
     # Evaluation data feedback loop: after every completed assessment, append a
     # de-identified record to this JSONL file.
-    # (Relative paths resolve against the project root; leave empty to disable.)
+    # (Relative paths resolve against the service/ directory; leave empty to disable.)
     eval_log_path: str = "data/assessments.jsonl"
 
-    # Demo mode: when true, both DeepSeek and the ML model return plausible fake data
+    # Demo mode: when true, LLM advice/chat/search return canned local templates and
+    # nothing goes out on the network; risk scores are always computed by the real
+    # model coefficients.
     mock_mode: bool = True
 
     # ---- Web search (the web_search server-side tool of DeepSeek's Anthropic protocol) ----

@@ -1,7 +1,7 @@
 """Evaluation feedback loop: after each assessment, append a de-identified record to a local JSONL file.
 
 Its purpose is to accumulate local validation data for the dengue risk model (eval harness /
-failure-case library) -- the project README's "known limitations" notes that the thresholds
+failure-case library) -- the service README's Scoring section notes that the thresholds
 have not been calibrated on the local population, and this logged data is the raw material
 for that calibration.
 

@@ -10,7 +10,8 @@ any of that, the harness turns red **before** users see it, and every failing
 scenario is dumped with its full request/response for offline triage. Those
 dumps, together with the `data/assessments.jsonl` feedback loop (see
 `scripts/eval_stats.py`), are the evidence base for the "should we retrain /
-recalibrate" decision called out in the README's known-limitations section.
+recalibrate" decision called out in the recalibration caveat at the end of the
+README's Scoring section.
 
 Everything runs in-process against the FastAPI app with `MOCK_MODE=true`
 forced — no server, no network, no DeepSeek calls — so results are
